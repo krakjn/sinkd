@@ -1,0 +1,44 @@
+[package]
+name = "sinkd-core"
+version = "0.0.5"
+description = "Shared library for sinkd sync daemon (Zenoh + rsync)"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "sinkd_core"
+path = "src/lib.rs"
+
+[dependencies]
+bincode = "1"
+chrono = { workspace = true }
+clap = { workspace = true }
+zenoh = { workspace = true }
+libc = "0.2"
+log = { workspace = true }
+nix = { version = "0.30", features = ["process", "signal"] }
+serde = { workspace = true }
+signal-hook = "0.3"
+toml = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+windows = { version = "0.60.0", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+] }
+users = "0.11.0"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

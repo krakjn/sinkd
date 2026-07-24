@@ -1,8 +1,15 @@
 [package]
 name = "scenario"
-version = "0.1.0"
+version = "0.0.5"
+description = "Behavioral scenario test harness for sinkd"
+authors.workspace = true
 edition = "2024"
 rust-version = "1.90"
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["sinkd", "testing", "integration"]
+categories = ["development-tools::testing"]
 
 [dependencies]
 clap = { workspace = true }
@@ -11,6 +18,11 @@ env_logger = "0.11"
 toml = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }
+
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
 
 # Inherit workspace lints
 [lints]

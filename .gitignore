@@ -2,12 +2,14 @@ target/
 **/*.rs.bk
 **/*.DS_Store
 
-test/
+# python virtual environments
 .venv/
-__pycache__/
+**/__pycache__/
 
-test_scenarios/
-
+# packaging artifacts
+pkg/artifacts/
 pkg/**/__gen/
 
-artifacts/
+test/
+test_scenarios/
+scenario/output/

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a .deb with a static musl sinkd (amd64/arm64) into artifacts/.
+# Build a .deb with a static musl sinkd (amd64/arm64) into pkg/artifacts/.
 # Requires: dpkg-deb, bump. Binary: target/*/release/sinkd for the musl triple, or set SINKD_BIN.
 set -euo pipefail
 
@@ -11,7 +11,22 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   exit 1
 fi
 
-VERSION=$(bump -b)
+# Allow callers (CI, container builds) to inject the version directly to avoid
+# requiring `bump` on the build host.
+if [[ -n "${SINKD_VERSION:-}" ]]; then
+  VERSION="${SINKD_VERSION}"
+elif command -v bump >/dev/null 2>&1; then
+  VERSION=$(bump -b)
+else
+  # Last-resort fallback: lift the base version from Cargo.toml.
+  VERSION=$(awk -F'"' '/^version[[:space:]]*=/ { split($2, a, "+"); print a[1]; exit }' "${ROOT}/sinkd-client/Cargo.toml")
+fi
+
+if [[ -z "${VERSION}" ]]; then
+  echo "could not determine version (set SINKD_VERSION, install bump, or fix Cargo.toml)." >&2
+  exit 1
+fi
+
 DEB_ARCH=$(dpkg --print-architecture)
 
 MUSL_TARGET=x86_64-unknown-linux-musl
@@ -19,7 +34,7 @@ if [[ "${DEB_ARCH}" == "arm64" ]]; then
   MUSL_TARGET=aarch64-unknown-linux-musl
 fi
 
-OUT="${ROOT}/artifacts"
+OUT="${ROOT}/pkg/artifacts"
 mkdir -p "${OUT}"
 
 STAGE=$(mktemp -d)
@@ -35,17 +50,29 @@ install -d "${STAGE}/usr/bin" \
 
 TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT}/target}"
 BIN="${SINKD_BIN:-${TARGET_DIR}/${MUSL_TARGET}/release/sinkd}"
+BIN_SRV="${SINKD_SRV_BIN:-${TARGET_DIR}/${MUSL_TARGET}/release/sinkd-srv}"
 
 if [[ ! -f "${BIN}" ]]; then
   echo "Missing binary at ${BIN}. Build sinkd for ${MUSL_TARGET} first or set SINKD_BIN." >&2
   exit 1
 fi
+if [[ ! -f "${BIN_SRV}" ]]; then
+  echo "Missing binary at ${BIN_SRV}. Build sinkd-srv for ${MUSL_TARGET} first or set SINKD_SRV_BIN." >&2
+  exit 1
+fi
 
 install "${BIN}" "${STAGE}/usr/bin/sinkd"
+install "${BIN_SRV}" "${STAGE}/usr/bin/sinkd-srv"
 install -m 644 LICENSE "${STAGE}/usr/share/doc/sinkd/copyright"
-install -m 644 "${ROOT}/cfg/system/sinkd.conf" "${STAGE}/etc/sinkd.conf"
-install -m 644 "${ROOT}/cfg/user/sinkd.conf" "${STAGE}/usr/share/sinkd/sinkd.user.conf"
-# install -m 644 "${ROOT}/cfg/user/sinkd.conf" "${STAGE}/etc/skel/.config/sinkd/sinkd.conf"
+install -m 644 "${ROOT}/sinkd-cfg/system.conf" "${STAGE}/etc/sinkd.conf"
+install -m 644 "${ROOT}/sinkd-cfg/server.conf" "${STAGE}/etc/sinkd.server.conf"
+install -m 644 "${ROOT}/sinkd-cfg/user.conf" "${STAGE}/usr/share/sinkd/sinkd.user.conf.example"
+
+# Init templates consumed by `sinkd init` / `sinkd-srv init` (disk-first;
+# binary falls back to embedded copies if these are missing).
+install -m 644 "${ROOT}/sinkd-client/system.conf.tmpl" "${STAGE}/usr/share/sinkd/sinkd.conf"
+install -m 644 "${ROOT}/sinkd-server/conf.tmpl" "${STAGE}/usr/share/sinkd/sinkd.server.conf"
+install -m 644 "${ROOT}/sinkd-client/conf.tmpl" "${STAGE}/usr/share/sinkd/sinkd.user.conf"
 
 cat >"${STAGE}/DEBIAN/control" <<EOF
 Package: sinkd

@@ -1,0 +1,47 @@
+# Server + alice colocated; bob in a second container.
+name: sinkd-compose-2c
+
+services:
+  server-alice:
+    build:
+      context: ../..
+      dockerfile: scenario/compose/Dockerfile
+    image: sinkd-compose:latest
+    hostname: server-alice
+    environment:
+      ROLE: server-client
+      USER: server
+      USER_NAME: alice
+      WATCH: /watch_alice
+      SINKD_SERVER_ADDR: server-alice
+      SSH_PEERS: "server-alice client-bob"
+    volumes:
+      - srv-data:/srv/sinkd
+      - alice-watch:/watch_alice
+      - ${SINKD_SSH_DIR}:/run/sinkd-ssh:ro
+    networks: [sinkd]
+
+  client-bob:
+    image: sinkd-compose:latest
+    hostname: client-bob
+    environment:
+      ROLE: client
+      USER_NAME: bob
+      USER: bob
+      WATCH: /watch_bob
+      SINKD_SERVER_ADDR: server-alice
+      SSH_PEERS: server-alice
+    depends_on: [server-alice]
+    volumes:
+      - bob-watch:/watch_bob
+      - ${SINKD_SSH_DIR}:/run/sinkd-ssh:ro
+    networks: [sinkd]
+
+volumes:
+  srv-data: {}
+  alice-watch: {}
+  bob-watch: {}
+
+networks:
+  sinkd:
+    driver: bridge

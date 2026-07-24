@@ -1,0 +1,59 @@
+# Production-like topology: server + two client containers (SSH rsync, no zenoh router).
+name: sinkd-compose-3c
+
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: scenario/compose/Dockerfile
+    image: sinkd-compose:latest
+    hostname: server
+    environment:
+      ROLE: server
+      USER: server
+      SSH_PEERS: "client-alice client-bob"
+    volumes:
+      - srv-data:/srv/sinkd
+      - ${SINKD_SSH_DIR}:/run/sinkd-ssh:ro
+    networks: [sinkd]
+
+  client-alice:
+    image: sinkd-compose:latest
+    hostname: client-alice
+    environment:
+      ROLE: client
+      USER_NAME: alice
+      USER: alice
+      WATCH: /watch_alice
+      SINKD_SERVER_ADDR: server
+      SSH_PEERS: server
+    depends_on: [server]
+    volumes:
+      - alice-watch:/watch_alice
+      - ${SINKD_SSH_DIR}:/run/sinkd-ssh:ro
+    networks: [sinkd]
+
+  client-bob:
+    image: sinkd-compose:latest
+    hostname: client-bob
+    environment:
+      ROLE: client
+      USER_NAME: bob
+      USER: bob
+      WATCH: /watch_bob
+      SINKD_SERVER_ADDR: server
+      SSH_PEERS: server
+    depends_on: [server]
+    volumes:
+      - bob-watch:/watch_bob
+      - ${SINKD_SSH_DIR}:/run/sinkd-ssh:ro
+    networks: [sinkd]
+
+volumes:
+  srv-data: {}
+  alice-watch: {}
+  bob-watch: {}
+
+networks:
+  sinkd:
+    driver: bridge

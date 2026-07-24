@@ -1,0 +1,8 @@
+# Compose scenario: root key-only SSH for rsync over SSH (internal bridge network).
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM no
+PidFile /var/run/sshd/sshd.pid

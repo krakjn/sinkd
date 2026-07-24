@@ -1,0 +1,19 @@
+# Minimum supported Rust for lint suggestions (match CI stable).
+msrv = "1.90"
+
+# Complexity / size budgets — tune after first clippy run.
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold = 7
+too-many-lines-threshold = 120
+type-complexity-threshold = 250
+array-size-threshold = 512_000
+
+# Treat public API changes as breaking when Clippy can tell.
+avoid-breaking-exported-api = true
+
+# Match project style (#[must_use] used selectively, not everywhere).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# Do not lint private items as if they were public API.
+check-private-items = false
