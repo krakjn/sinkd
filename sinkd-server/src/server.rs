@@ -424,7 +424,7 @@ fn synch_entry(
                     }
                 }
 
-                let dest = PathBuf::from(format!("{}/", &srv_dir.display()));
+                let dest = PathBuf::from(format!("{}/", srv_dir.display()));
 
                 match status.lock() {
                     Ok(mut state) => *state = ipc::Status::NotReady(ipc::Reason::Busy),
