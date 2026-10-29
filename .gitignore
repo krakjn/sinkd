@@ -10,6 +10,4 @@ target/
 pkg/artifacts/
 pkg/**/__gen/
 
-test/
-test_scenarios/
-scenario/output/
+scenario/docker/bin/

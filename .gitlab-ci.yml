@@ -1,0 +1,105 @@
+# Linux only. GitLab shared runners have no macOS.
+stages: [test, build, release]
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+default:
+  interruptible: true
+  # glibc host. The musl target in .cargo/config.toml static-links build scripts,
+  # and a static musl bindgen cannot dlopen libclang.
+  image: rust:1-bookworm
+
+.linux:
+  variables:
+    CARGO_HOME: $CI_PROJECT_DIR/.cargo-home
+  cache:
+    key: $RUST_TARGET
+    paths:
+      - .cargo-home
+      - target
+  before_script:
+    - apt-get update -qq
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl pkg-config clang libclang-dev musl-tools dpkg-dev
+    - curl -fsSL https://reflect.ballast.dev/install.sh | sh
+    - rustup component add clippy
+    - rustup target add "$RUST_TARGET"
+
+test:
+  extends: .linux
+  stage: test
+  variables:
+    RUST_TARGET: x86_64-unknown-linux-musl
+  script:
+    - cargo clippy --all-targets --workspace -- -D warnings
+    - cargo test --workspace
+
+.build:
+  extends: .linux
+  stage: build
+  needs: [test]
+  script:
+    - cargo build -p sinkd -p sinkd-srv --release --locked --target "$RUST_TARGET"
+    - mkdir -p pkg/artifacts
+    - cp "target/${RUST_TARGET}/release/sinkd" "pkg/artifacts/sinkd-${PLATFORM}"
+    - cp "target/${RUST_TARGET}/release/sinkd-srv" "pkg/artifacts/sinkd-srv-${PLATFORM}"
+    - bash pkg/debian/create.sh
+    - echo "JOB_ID_${PLATFORM_ENV}=$CI_JOB_ID" > job.env
+    - DEB=$(basename pkg/artifacts/sinkd_*_*.deb)
+    - echo "DEB_${PLATFORM_ENV}=$DEB" >> job.env
+  artifacts:
+    paths:
+      - pkg/artifacts/
+    expire_in: 7 days
+    reports:
+      dotenv: job.env
+
+build-amd64:
+  extends: .build
+  variables:
+    RUST_TARGET: x86_64-unknown-linux-musl
+    PLATFORM: linux-amd64
+    PLATFORM_ENV: AMD64
+
+build-arm64:
+  extends: .build
+  tags: [saas-linux-medium-arm64]
+  variables:
+    RUST_TARGET: aarch64-unknown-linux-musl
+    PLATFORM: linux-arm64
+    PLATFORM_ENV: ARM64
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  interruptible: false
+  needs:
+    - job: build-amd64
+      artifacts: true
+    - job: build-arm64
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "release $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: $CI_COMMIT_TAG
+    description: "sinkd $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: sinkd-linux-amd64
+          url: "$CI_PROJECT_URL/-/jobs/$JOB_ID_AMD64/artifacts/file/pkg/artifacts/sinkd-linux-amd64"
+        - name: sinkd-srv-linux-amd64
+          url: "$CI_PROJECT_URL/-/jobs/$JOB_ID_AMD64/artifacts/file/pkg/artifacts/sinkd-srv-linux-amd64"
+        - name: sinkd-linux-arm64
+          url: "$CI_PROJECT_URL/-/jobs/$JOB_ID_ARM64/artifacts/file/pkg/artifacts/sinkd-linux-arm64"
+        - name: sinkd-srv-linux-arm64
+          url: "$CI_PROJECT_URL/-/jobs/$JOB_ID_ARM64/artifacts/file/pkg/artifacts/sinkd-srv-linux-arm64"
+        - name: $DEB_AMD64
+          url: "$CI_PROJECT_URL/-/jobs/$JOB_ID_AMD64/artifacts/file/pkg/artifacts/$DEB_AMD64"
+        - name: $DEB_ARM64
+          url: "$CI_PROJECT_URL/-/jobs/$JOB_ID_ARM64/artifacts/file/pkg/artifacts/$DEB_ARM64"

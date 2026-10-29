@@ -1,0 +1,14 @@
+[Unit]
+Description=sinkd sync server
+After=network-online.target
+
+[Service]
+Type=simple
+User=sinkd
+Group=sinkd
+ExecStart=/usr/bin/sinkd-srv --sync-root /srv/sinkd --config /etc/sinkd/server.toml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

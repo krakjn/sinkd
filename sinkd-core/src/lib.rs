@@ -1,171 +1,191 @@
-//! sinkd-core — shared sync daemon library (Zenoh + rsync).
-//!
-//! Binaries: `sinkd` (client) and `sinkd-srv` (server).
+//! Shared pieces for the sinkd client and server.
 
-#[macro_use]
-pub mod fancy;
-#[macro_use]
-pub mod outcome;
-pub mod config;
-pub mod conflict;
-pub mod init;
-pub mod ipc;
-pub mod parameters;
-pub mod rsync;
-pub mod shiplog;
-pub mod test_hooks;
-pub mod time;
+mod auth;
+mod control;
+pub mod manifest;
+mod paths;
+mod session;
 
-pub use outcome::Outcome;
-pub use std::path::{Path, PathBuf};
-pub use std::fs;
+pub use auth::{
+    ensure_client_id, ensure_server_identity, issue_client, load_client_bundle, load_peers,
+    save_client_bundle, save_peer, secrets_eq, ClientBundle, ServerIdentity,
+};
+pub use control::{notify, serve, socket_path};
+pub use manifest::{conflict_name, dirty, preserve, scan, Manifest};
+pub use paths::{
+    anchor_id, anchor_key, config_dir, expand, hostname, random_bytes, runtime_dir, sanitize,
+    state_dir, user_name,
+};
+pub use session::{open_session, Role};
 
-pub fn have_permissions() -> bool {
-    #[cfg(unix)]
-    {
-        // get effective user ID
-        unsafe { libc::geteuid() == 0 }
-    }
-    #[cfg(windows)]
-    {
-        use windows::Win32::Foundation::HANDLE;
-        use windows::Win32::Security::GetTokenInformation;
-        use windows::Win32::Security::{TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
-        use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use std::path::PathBuf;
 
-        unsafe {
-            let process_handle = GetCurrentProcess();
-            let mut token_handle: HANDLE = HANDLE::default();
-            if OpenProcessToken(process_handle, TOKEN_QUERY, &raw mut token_handle).is_err() {
-                return false;
-            }
-            // Check if the token has admin rights
-            let mut elevation: TOKEN_ELEVATION = std::mem::zeroed();
-            let mut return_length = 0;
-            let size = u32::try_from(std::mem::size_of::<TOKEN_ELEVATION>()).unwrap_or(u32::MAX);
-            if GetTokenInformation(
-                token_handle,
-                TokenElevation,
-                // look away, interfacing with Windows is hacky even with windows crate
-                Some((&raw mut elevation).cast()),
-                size,
-                &raw mut return_length,
-            )
-            .is_err()
-            {
-                return false;
-            }
+use serde::Deserialize;
 
-            elevation.TokenIsElevated != 0
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct Watch {
+    pub path: PathBuf,
+    pub share: bool,
 }
 
-#[cfg(unix)]
-pub fn get_hostname() -> Outcome<String> {
-    use libc::{c_char, sysconf, _SC_HOST_NAME_MAX};
-    use std::ffi::CStr;
-
-    unsafe {
-        // Get the maximum hostname length
-        let max_len = sysconf(_SC_HOST_NAME_MAX);
-        if max_len == -1 {
-            return bad!("Failed to determine maximum hostname length");
-        }
-
-        let mut buffer =
-            vec![0u8; usize::try_from(max_len).map_err(|_| "Invalid hostname buffer size")?];
-        let ptr = buffer.as_mut_ptr().cast::<c_char>();
-
-        if libc::gethostname(
-            ptr,
-            usize::try_from(max_len).map_err(|_| "Invalid hostname buffer size")?,
-        ) != 0
-        {
-            return bad!("Failed to retrieve hostname");
-        }
-
-        // Convert the hostname from C string to Rust string
-        let cstr = CStr::from_ptr(ptr);
-        match cstr.to_str() {
-            Ok(s) => Ok(s.to_owned()),
-            Err(e) => bad!("Failed to convert hostname to UTF-8: {}", e),
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct ServerSettings {
+    pub sync_root: PathBuf,
+    pub state_dir: PathBuf,
+    pub runtime_dir: PathBuf,
+    pub bind: String,
+    pub zenoh_port: u16,
+    pub data_port: u16,
+    pub pair_port: u16,
+    pub fixed_pair_code: Option<String>,
 }
 
-#[cfg(windows)]
-pub fn get_hostname() -> Outcome<String> {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use windows::Win32::System::WindowsProgramming::{GetComputerNameW, MAX_COMPUTERNAME_LENGTH};
-
-    let mut buffer = [0u16; MAX_COMPUTERNAME_LENGTH as usize + 1];
-    let mut size = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
-
-    unsafe {
-        let pwstr = windows::core::PWSTR(buffer.as_mut_ptr());
-        if let Err(e) = GetComputerNameW(Some(pwstr), &raw mut size) {
-            bad!("Failed to retrieve the hostname: {}", e)
-        } else {
-            let hostname = OsString::from_wide(&buffer[..size as usize]);
-            Ok(hostname.to_string_lossy().into_owned())
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct ClientSettings {
+    pub server: String,
+    pub state_dir: PathBuf,
+    pub runtime_dir: PathBuf,
+    pub zenoh_port: u16,
+    pub pair_port: u16,
+    pub watches: Vec<Watch>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct ServerFile {
+    sync_root: Option<String>,
+    bind: Option<String>,
+    zenoh_port: Option<u16>,
+    data_port: Option<u16>,
+    pair_port: Option<u16>,
+}
 
-// this will resolve all known paths, converts relative to absolute
-pub fn resolve(path: &str) -> Outcome<PathBuf> {
-    // NOTE: `~` is a shell expansion not handled by system calls
-    if path.starts_with("~/") {
-        let mut p = match std::env::var("HOME") {
-            Ok(home_dir) => PathBuf::from(home_dir),
-            Err(e) => {
-                return bad!("HOME env var not defined: {}", e);
-            }
-        };
-        let after_tilde = path
-            .strip_prefix("~/")
-            .ok_or_else(|| format!("internal: path was expected to start with '~/': {path}"))?;
-        p.push(after_tilde);
-        match p.canonicalize() {
-            Ok(resolved) => Ok(resolved),
-            Err(e) => bad!("{} '{}'", e, p.display()),
+#[derive(Debug, Deserialize, Default)]
+struct ClientFile {
+    server: Option<String>,
+    zenoh_port: Option<u16>,
+    pair_port: Option<u16>,
+    anchors: Option<Vec<String>>,
+    shares: Option<Vec<String>>,
+}
+
+#[derive(Debug, Default)]
+pub struct ServerOverrides {
+    pub sync_root: Option<PathBuf>,
+    pub bind: Option<String>,
+    pub zenoh_port: Option<u16>,
+    pub data_port: Option<u16>,
+    pub pair_port: Option<u16>,
+    pub state_dir: Option<PathBuf>,
+    pub runtime_dir: Option<PathBuf>,
+    pub fixed_pair_code: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct ClientOverrides {
+    pub server: Option<String>,
+    pub anchors: Vec<PathBuf>,
+    pub shares: Vec<PathBuf>,
+    pub zenoh_port: Option<u16>,
+    pub pair_port: Option<u16>,
+    pub state_dir: Option<PathBuf>,
+    pub runtime_dir: Option<PathBuf>,
+}
+
+fn read_toml<T: for<'de> Deserialize<'de> + Default>(path: &std::path::Path) -> Result<T, String> {
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+pub fn load_server(config: Option<&std::path::Path>, over: ServerOverrides) -> Result<ServerSettings, String> {
+    let path = config.map_or_else(|| config_dir().join("server.toml"), PathBuf::from);
+    let file = read_toml::<ServerFile>(&path)?;
+    let sync_root = over
+        .sync_root
+        .or(file.sync_root.map(|s| expand(&s)))
+        .unwrap_or_else(|| expand("~/sinkd-data"));
+    Ok(ServerSettings {
+        sync_root,
+        state_dir: over.state_dir.unwrap_or_else(|| state_dir("sinkd-srv")),
+        runtime_dir: over.runtime_dir.unwrap_or_else(runtime_dir),
+        bind: over.bind.or(file.bind).unwrap_or_else(|| "0.0.0.0".to_string()),
+        zenoh_port: over.zenoh_port.or(file.zenoh_port).unwrap_or(7447),
+        data_port: over.data_port.or(file.data_port).unwrap_or(7448),
+        pair_port: over.pair_port.or(file.pair_port).unwrap_or(7449),
+        fixed_pair_code: over.fixed_pair_code,
+    })
+}
+
+pub fn load_client(config: Option<&std::path::Path>, over: ClientOverrides) -> Result<ClientSettings, String> {
+    let path = config.map_or_else(|| config_dir().join("client.toml"), PathBuf::from);
+    let file = read_toml::<ClientFile>(&path)?;
+    let state = over.state_dir.clone().unwrap_or_else(|| state_dir("sinkd"));
+    let server = over
+        .server
+        .or(file.server)
+        .or_else(|| remembered_host(&state))
+        .ok_or_else(|| {
+            "no server set; pass --server, set it in client.toml, or run `sinkd pair <host>`".to_string()
+        })?;
+    let mut watches = Vec::new();
+    if over.anchors.is_empty() && over.shares.is_empty() {
+        for path in file.anchors.unwrap_or_default() {
+            watches.push(Watch { path: expand(&path), share: false });
+        }
+        for path in file.shares.unwrap_or_default() {
+            watches.push(Watch { path: expand(&path), share: true });
         }
     } else {
-        match PathBuf::from(path).canonicalize() {
-            Ok(resolved) => Ok(resolved),
-            Err(e) => bad!("{} '{}'", e, path),
+        for path in over.anchors {
+            watches.push(Watch { path, share: false });
+        }
+        for path in over.shares {
+            watches.push(Watch { path, share: true });
         }
     }
+    if watches.is_empty() {
+        return Err("no anchors; pass --anchor or set anchors in client.toml".into());
+    }
+    Ok(ClientSettings {
+        server,
+        state_dir: state,
+        runtime_dir: over.runtime_dir.unwrap_or_else(runtime_dir),
+        zenoh_port: over.zenoh_port.or(file.zenoh_port).unwrap_or(7447),
+        pair_port: over.pair_port.or(file.pair_port).unwrap_or(7449),
+        watches,
+    })
 }
 
-pub fn ensure_path(path: &Path) -> Outcome<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    log::debug!("Creating directory for path: {}", path.display());
-    match fs::create_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(e) => bad!("Unable to create '{}'  {}", path.display(), e),
-    }
+pub fn remembered_host(state: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(state.join("server_host"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
-/// Ensure parent directories exist when `path` is a file (config, log, etc.).
-pub fn ensure_parent_dir(path: &Path) -> Outcome<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    if parent.as_os_str().is_empty() {
-        return Ok(());
+pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    if parent.exists() {
-        return Ok(());
-    }
-    log::debug!("Creating parent directory: {}", parent.display());
-    match fs::create_dir_all(parent) {
-        Ok(()) => Ok(()),
-        Err(e) => bad!("Unable to create '{}' {}", parent.display(), e),
-    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+pub fn read_basis(state: &std::path::Path, anchor_key: &str) -> Option<u64> {
+    let text = std::fs::read_to_string(state.join("basis").join(anchor_key)).ok()?;
+    text.trim().parse().ok()
+}
+
+pub fn write_basis(state: &std::path::Path, anchor_key: &str, generation: u64) -> Result<(), String> {
+    atomic_write(
+        &state.join("basis").join(anchor_key),
+        format!("{generation}\n").as_bytes(),
+    )
+}
+
+pub fn manifest_path(state: &std::path::Path, anchor_key: &str) -> PathBuf {
+    state.join("manifest").join(anchor_key)
 }

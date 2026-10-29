@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build a .deb with a static musl sinkd (amd64/arm64) into pkg/artifacts/.
-# Requires: dpkg-deb, bump. Binary: target/*/release/sinkd for the musl triple, or set SINKD_BIN.
+# Build a .deb into pkg/artifacts/.
+# The binary is a static musl build with libreflect.a linked in. No runtime library deps.
+# Set SINKD_BIN / SINKD_SRV_BIN to override.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -28,11 +29,11 @@ if [[ -z "${VERSION}" ]]; then
 fi
 
 DEB_ARCH=$(dpkg --print-architecture)
-
-MUSL_TARGET=x86_64-unknown-linux-musl
-if [[ "${DEB_ARCH}" == "arm64" ]]; then
-  MUSL_TARGET=aarch64-unknown-linux-musl
-fi
+case "${DEB_ARCH}" in
+  amd64) MUSL_TARGET=x86_64-unknown-linux-musl ;;
+  arm64) MUSL_TARGET=aarch64-unknown-linux-musl ;;
+  *) echo "unsupported architecture ${DEB_ARCH}" >&2; exit 1 ;;
+esac
 
 OUT="${ROOT}/pkg/artifacts"
 mkdir -p "${OUT}"
@@ -53,26 +54,22 @@ BIN="${SINKD_BIN:-${TARGET_DIR}/${MUSL_TARGET}/release/sinkd}"
 BIN_SRV="${SINKD_SRV_BIN:-${TARGET_DIR}/${MUSL_TARGET}/release/sinkd-srv}"
 
 if [[ ! -f "${BIN}" ]]; then
-  echo "Missing binary at ${BIN}. Build sinkd for ${MUSL_TARGET} first or set SINKD_BIN." >&2
+  echo "Missing binary at ${BIN}. cargo build -p sinkd --release --target ${MUSL_TARGET}, or set SINKD_BIN." >&2
   exit 1
 fi
 if [[ ! -f "${BIN_SRV}" ]]; then
-  echo "Missing binary at ${BIN_SRV}. Build sinkd-srv for ${MUSL_TARGET} first or set SINKD_SRV_BIN." >&2
+  echo "Missing binary at ${BIN_SRV}. cargo build -p sinkd-srv --release --target ${MUSL_TARGET}, or set SINKD_SRV_BIN." >&2
   exit 1
 fi
 
 install "${BIN}" "${STAGE}/usr/bin/sinkd"
 install "${BIN_SRV}" "${STAGE}/usr/bin/sinkd-srv"
 install -m 644 LICENSE "${STAGE}/usr/share/doc/sinkd/copyright"
-install -m 644 "${ROOT}/sinkd-cfg/system.conf" "${STAGE}/etc/sinkd.conf"
-install -m 644 "${ROOT}/sinkd-cfg/server.conf" "${STAGE}/etc/sinkd.server.conf"
-install -m 644 "${ROOT}/sinkd-cfg/user.conf" "${STAGE}/usr/share/sinkd/sinkd.user.conf.example"
-
-# Init templates consumed by `sinkd init` / `sinkd-srv init` (disk-first;
-# binary falls back to embedded copies if these are missing).
-install -m 644 "${ROOT}/sinkd-client/system.conf.tmpl" "${STAGE}/usr/share/sinkd/sinkd.conf"
-install -m 644 "${ROOT}/sinkd-server/conf.tmpl" "${STAGE}/usr/share/sinkd/sinkd.server.conf"
-install -m 644 "${ROOT}/sinkd-client/conf.tmpl" "${STAGE}/usr/share/sinkd/sinkd.user.conf"
+install -d "${STAGE}/etc/sinkd" "${STAGE}/usr/lib/systemd/system" "${STAGE}/usr/lib/systemd/user"
+install -m 644 "${ROOT}/sinkd-cfg/server.toml" "${STAGE}/etc/sinkd/server.toml"
+install -m 644 "${ROOT}/sinkd-cfg/client.toml" "${STAGE}/usr/share/sinkd/client.toml"
+install -m 644 "${ROOT}/pkg/systemd/sinkd-srv.service" "${STAGE}/usr/lib/systemd/system/sinkd-srv.service"
+install -m 644 "${ROOT}/pkg/systemd/sinkd.service" "${STAGE}/usr/lib/systemd/user/sinkd.service"
 
 cat >"${STAGE}/DEBIAN/control" <<EOF
 Package: sinkd
@@ -81,7 +78,6 @@ Architecture: ${DEB_ARCH}
 Maintainer: Tony <krakjn@gmail.com>
 Section: utils
 Priority: optional
-Depends: rsync
 Description: Deployable Cloud, file sync daemon.
  bring everything and the kitchen sink to your local cloud.
 EOF

@@ -1,0 +1,18 @@
+[package]
+name = "sinkd-reflect-sys"
+version = "0.0.5"
+description = "Bindgen bindings for the packaged libreflect"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+links = "reflect"
+
+[dependencies]
+
+[build-dependencies]
+pkg-config = "0.3"
+bindgen = "0.72"
+
+[lints]
+workspace = true

@@ -1,0 +1,72 @@
+name: sinkd-scenario
+
+services:
+  server:
+    image: sinkd-scenario
+    build: .
+    entrypoint: ["sinkd-srv"]
+    command:
+      - --sync-root
+      - /data
+      - --state-dir
+      - /var/lib/sinkd-srv
+      - --runtime-dir
+      - /run/sinkd
+      - --bind
+      - 0.0.0.0
+      - --pair-code
+      - "424242"
+    hostname: server
+    volumes:
+      - srv-data:/data
+      - srv-state:/var/lib/sinkd-srv
+
+  alice:
+    image: sinkd-scenario
+    environment:
+      USER: tony
+    hostname: alice
+    depends_on:
+      - server
+    volumes:
+      - alice-sync:/home/tony/sync
+      - alice-share:/srv/share
+      - alice-state:/var/lib/sinkd
+
+  bob:
+    image: sinkd-scenario
+    environment:
+      USER: tony
+    hostname: bob
+    depends_on:
+      - server
+    volumes:
+      - bob-sync:/home/tony/sync
+      - bob-share:/srv/share
+      - bob-state:/var/lib/sinkd
+
+  carol:
+    profiles: ["carol"]
+    image: sinkd-scenario
+    environment:
+      USER: tony
+    hostname: carol
+    depends_on:
+      - server
+    volumes:
+      - carol-sync:/home/tony/sync
+      - carol-share:/srv/share
+      - carol-state:/var/lib/sinkd
+
+volumes:
+  srv-data:
+  srv-state:
+  alice-sync:
+  alice-share:
+  alice-state:
+  bob-sync:
+  bob-share:
+  bob-state:
+  carol-sync:
+  carol-share:
+  carol-state:

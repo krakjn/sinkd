@@ -1,6 +1,0 @@
-name = "compose-2c"
-timeout_ms = 900000
-
-[[steps]]
-kind = "run_command"
-command = "COMPOSE_SPEC=compose-2c bash scenario/scripts/compose.sh"

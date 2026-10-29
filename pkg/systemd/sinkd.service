@@ -1,0 +1,12 @@
+[Unit]
+Description=sinkd folder watch client
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sinkd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

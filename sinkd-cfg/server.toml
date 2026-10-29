@@ -1,0 +1,5 @@
+# sync_root = "/srv/sinkd"
+# bind = "0.0.0.0"
+# zenoh_port = 7447
+# data_port = 7448
+# pair_port = 7449

@@ -1,17 +1,7 @@
-# On Windows MSVC, statically link the C runtime so that the resulting EXE does
-# not depend on the vcruntime DLL.
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+# Linux builds are static musl.
+[build]
+target = "x86_64-unknown-linux-musl"
 
-[target.arm-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
-
-[target.aarch64-unknown-linux-gnu]
-linker = "aarch64-linux-gnu-gcc"
-
-# Static musl binaries. Proc-macro crates are built for the host (build) triple and
-# executed at compile time; the Tier-2 `*-linux-musl` targets are normal Cargo targets.
-# If a dependency fails to link static, drop `crt-static` or `link-self-contained` and retry.
 [target.x86_64-unknown-linux-musl]
 rustflags = [
   "-C", "target-feature=+crt-static",
@@ -23,3 +13,10 @@ rustflags = [
   "-C", "target-feature=+crt-static",
   "-C", "link-self-contained=yes",
 ]
+
+# musl-gcc compiles the C in ring. reflect.pc describes the musl archive, so
+# pkg-config is allowed to answer while cross-compiling to the musl target.
+[env]
+CC_x86_64_unknown_linux_musl = "musl-gcc"
+CC_aarch64_unknown_linux_musl = "musl-gcc"
+PKG_CONFIG_ALLOW_CROSS = "1"

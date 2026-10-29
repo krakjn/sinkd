@@ -1,8 +1,0 @@
-# Optional Zenoh router for manual / multi-host debugging. sinkd peers scout by default on
-# loopback; for containers or remote peers, point Zenoh at this router (future: ZENOH_CONFIG).
-# Usage: docker compose up -d zenoh
-services:
-  zenoh:
-    image: eclipse/zenoh:latest
-    ports:
-      - "7447:7447/tcp"

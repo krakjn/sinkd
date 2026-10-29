@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "sinkd-reflect-sys",
+    "sinkd-reflect",
+    "sinkd-proto",
     "sinkd-core",
     "sinkd-client",
     "sinkd-server",
@@ -11,20 +14,21 @@ members = [
 authors = ["Tony <krakjn@gmail.com>"]
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/krakjn/sinkd"
+repository = "https://gitlab.com/ballast-dev/sinkd"
 readme = "README.md"
-keywords = ["sync", "rsync", "zenoh", "filesystem"]
+keywords = ["sync", "libreflect", "zenoh", "filesystem"]
 categories = ["filesystem"]
 rust-version = "1.90"
 
 [workspace.dependencies]
 log = { version = "0.4", features = ["std"] }
-chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.9"
 clap = { version = "4", features = ["derive"] }
-bincode = "1"
-zenoh = "1.7.2"
+zenoh = { version = "1.7.2", features = ["transport_tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync", "io-util", "signal", "fs"] }
+postcard = { version = "1", features = ["alloc"] }
+env_logger = "0.11"
 
 [workspace.lints.rust]
 warnings = { level = "deny", priority = -1 }

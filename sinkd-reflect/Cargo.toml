@@ -1,0 +1,17 @@
+[package]
+name = "sinkd-reflect"
+version = "0.0.5"
+description = "Safe wrapper around libreflect"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+libc = "0.2"
+sinkd-reflect-sys = { path = "../sinkd-reflect-sys" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

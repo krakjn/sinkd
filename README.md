@@ -19,39 +19,38 @@ Raspberry Pi, you can create your own __local__ cloud! The purpose and goal of t
 is to get out of the users way while reducing the overhead of keeping up environments 
 across many computers. 
 
-1. Cross-Platform (*nix, Windows(WSL)), built for ARM and x86
-1. Wraps `rsync` into a daemon keeping track of file events
-1. Physical access to your files
-1. Granular permissions per user  
-1. Uses DDS (Data Distribution Service) for peer-to-peer communication - no broker required
+One machine is the hub. The others watch folders and push. Zenoh carries the control messages over mutual TLS. libreflect copies the files over a short-lived TCP connection. Windows is WSL only.
+
+Build needs the libreflect package (`reflect.pc`, `/usr/include/reflect.h`, `/usr/lib/libreflect.a`) and, on Arch, the `rust-musl` package. `cargo build --release` produces a static musl binary with libreflect, lz4, and zstd inside it. See [docs/protocol.md](docs/protocol.md) and [docs/encryption.md](docs/encryption.md).
+
+### Try it on two machines
+
+```bash
+# machine A
+cargo run -p sinkd-srv -- --sync-root ~/sinkd-data
+
+# machine B, after the server prints a 6-digit code
+cargo run -p sinkd -- pair <A-hostname-or-ip>
+cargo run -p sinkd -- --server <A-hostname-or-ip> --anchor ~/Documents
+```
+
+Both stay in the foreground and log to stderr. Ctrl-C stops them. `--config` points at a toml file so a test does not need `/etc`.
 
 ### Installation
 
-**macOS:** use Homebrew with the formula in this repo:
+**Linux:** `pkg/debian/create.sh` and `pkg/arch/create.sh` package the static musl build. Nothing else is required at runtime. `just test-docker` runs the sync scenarios in Alpine.
 
-```bash
-brew install --head ./pkg/homebrew/sinkd.rb
-```
+**macOS:** `brew install --head ./pkg/homebrew/sinkd.rb` after libreflect is installed so `pkg-config reflect` works.
 
-See comments in [`pkg/homebrew/sinkd.rb`](pkg/homebrew/sinkd.rb) for a versioned install from a release tarball.
+systemd user unit: `pkg/systemd/sinkd.service`. systemd system unit: `pkg/systemd/sinkd-srv.service`. launchd plists are in `pkg/launchd/`.
 
-**Linux / Windows:** prebuilt binaries and packages (`.deb`, `.pkg.tar.zst`, Windows zip) attach to [GitHub Releases](https://github.com/ballast-dev/sinkd/releases) when you tag a version. Releases ship **`sinkd`** (watch client) and **`sinkd-srv`** (sync server).
-
-### Workspace layout
+### Workspace
 
 | Crate | Role |
 |-------|------|
-| [`core`](core/) | `sinkd-core` library — Zenoh IPC, config, rsync helpers, init templates |
-| [`client`](client/) | `sinkd` binary — flattened CLI: `sinkd start`, `sinkd init`, … |
-| [`server`](server/) | `sinkd-srv` binary — `sinkd-srv start`, `sinkd-srv init`, … |
-
-Breaking CLI change from the single-binary layout: use **`sinkd …`** instead of **`sinkd client …`**, **`sinkd-srv …`** instead of **`sinkd server …`**, and **`sinkd-srv init …`** instead of **`sinkd init server …`** (server config scaffold).
-
-**Arch Linux (aarch64):** CI does not build Arch packages on ARM64 runners (no suitable multi-arch `archlinux` image in practice). Use the `linux-arm64` binary from the release, build [`pkg/arch/create.sh`](pkg/arch/create.sh) locally, or install another distro’s artifact.
-
-### Roadmap
-
-- use `btrfs` on a virtual mount for ease of snapshotting
-- add encryption to files watched by sinkd
-- access from outside the LAN firewall
-- use `git-lfs` to enable data restore (manual tagging)
+| `sinkd-reflect-sys` | bindgen against the installed `reflect.h`, static link of `libreflect.a` |
+| `sinkd-reflect` | safe wrapper around a reflect job |
+| `sinkd-proto` | postcard messages and Zenoh key names |
+| `sinkd-core` | config, pairing certs, paths |
+| `sinkd-client` | `sinkd` |
+| `sinkd-server` | `sinkd-srv` |
