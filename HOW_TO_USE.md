@@ -95,6 +95,14 @@ State (keys, the remembered hub, what has already synced) lives in `~/.local/sta
 
 The systemd units in `pkg/systemd/` are thin wrappers. The client unit is a user service (`sinkd`). The hub unit is a system service (`sinkd-srv`) running as user `sinkd`, with the store at `/srv/sinkd` and the config at `/etc/sinkd/server.toml`. macOS plists are in `pkg/launchd/`.
 
+The hub prints the 6-digit pair code when a client connects, on stderr. Under systemd that goes to the journal, not the terminal. Start `sinkd pair` on the other machine, then on the hub:
+
+```bash
+journalctl -u sinkd-srv -f
+```
+
+Look for `pair code 424242 for client …` and type that code into the client.
+
 `sinkd stop` and `sinkd-srv stop` ask the running process to exit. `reload` does not pick up new folders yet. Stop it and start it again.
 
 ## One copy, without the hub
