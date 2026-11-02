@@ -46,3 +46,16 @@ docker-build: musl
 # Alpine containers: pair, push, fan-out, delete, conflict, late joiner, restart, share.
 test-docker: docker-build
     bash scenario/docker/run.sh
+
+# Assemble the pages site and open it. Ctrl-C stops the server.
+site:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf _site
+    mkdir -p _site/assets
+    cp -R site/. _site/
+    cp assets/sinkd-slim.svg _site/assets/
+    cp assets/imgs/sinkd-black-txt.png assets/imgs/sinkd-white-txt.png _site/assets/
+    echo "http://127.0.0.1:8765  (Ctrl-C to stop)"
+    (sleep 0.4 && xdg-open http://127.0.0.1:8765) >/dev/null 2>&1 &
+    exec python3 -m http.server 8765 --directory _site

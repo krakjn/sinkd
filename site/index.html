@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sinkd · your files, on your machines</title>
+  <meta name="description" content="sinkd keeps folders in step across your own computers. One hub, the rest watch. No account, no cloud.">
+  <meta name="theme-color" content="#eef0ee">
+  <link rel="icon" href="assets/sinkd-slim.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script>document.documentElement.classList.replace("no-js", "js")</script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#top">
+      <img class="wordmark on-light" src="assets/sinkd-black-txt.png" alt="">
+      <img class="wordmark on-dark" src="assets/sinkd-white-txt.png" alt="">
+      <span class="sr-only">sinkd</span>
+    </a>
+    <a class="ver" id="version" hidden></a>
+    <span class="spacer"></span>
+    <a href="#why">Why</a>
+    <a href="#how">How</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/octo-works/sinkd">GitHub</a>
+  </header>
+
+  <section class="hero" id="top">
+    <div class="hero-mark" aria-hidden="true">
+      <i class="pkt" style="--a: 8deg; --t: 0s"></i>
+      <i class="pkt" style="--a: 52deg; --t: .45s"></i>
+      <i class="pkt" style="--a: 98deg; --t: .9s"></i>
+      <i class="pkt" style="--a: 142deg; --t: 1.3s"></i>
+      <i class="pkt" style="--a: 188deg; --t: .2s"></i>
+      <i class="pkt" style="--a: 232deg; --t: .7s"></i>
+      <i class="pkt" style="--a: 276deg; --t: 1.15s"></i>
+      <i class="pkt" style="--a: 322deg; --t: 1.6s"></i>
+      <div class="mark"></div>
+    </div>
+    <p class="tagline">bring everything and the kitchen sink to your local cloud</p>
+    <div class="cmd">
+      <div class="cmd-line">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code id="hero-cmd">curl -fsSL https://sinkd.octoworks.shop/install.sh | sh</code>
+      </div>
+      <button type="button" class="copy" data-copy="#hero-cmd">Copy</button>
+    </div>
+  </section>
+
+  <main>
+    <section id="why" class="section">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>Your machines, not a service</p>
+        <h2 data-reveal>A folder on this computer stays the same folder on that one.</h2>
+        <ul class="cards">
+          <li class="card" data-reveal>
+            <h3>Hub and spoke</h3>
+            <p>One computer stores the files. The others watch folders. Zenoh carries the control messages over mutual TLS.</p>
+          </li>
+          <li class="card" data-reveal>
+            <h3>Delta sync</h3>
+            <p>libreflect sends the changed blocks, not the whole file, over a short-lived connection.</p>
+          </li>
+          <li class="card" data-reveal>
+            <h3>A static binary</h3>
+            <p>Linux builds are musl, with libreflect inside. Copy the two programs and run them. Nothing else to install.</p>
+          </li>
+          <li class="card" data-reveal>
+            <h3>Conflicts kept</h3>
+            <p>The hub is the source of truth. If you also edited, those files are set aside, not overwritten.</p>
+          </li>
+          <li class="card" data-reveal>
+            <h3>Pair on the LAN</h3>
+            <p>The hub prints a 6-digit code. Type it once on the other machine. No account.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="how" class="section section-alt">
+      <div class="wrap split">
+        <div>
+          <p class="eyebrow" data-reveal>How it works</p>
+          <h2 data-reveal>One hub. The rest follow.</h2>
+          <p data-reveal>Run <code>sinkd-srv</code> on the machine that should hold the files. Run <code>sinkd</code> everywhere else, and name the folders to watch. A save is pushed. A file that shows up on the hub is pulled. A delete on one side becomes a delete on the other.</p>
+          <p data-reveal>A share is one tree for every client. An anchor is one tree per user. Both live on the hub, under the directory you gave <code>--sync-root</code>.</p>
+        </div>
+        <svg class="diagram" viewBox="0 0 560 280" role="img" aria-label="A hub in the center, connected to three clients" data-reveal>
+          <g fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.45">
+            <line x1="280" y1="132" x2="92" y2="64"/>
+            <line x1="280" y1="132" x2="92" y2="214"/>
+            <line x1="280" y1="132" x2="468" y2="132"/>
+          </g>
+          <g fill="none" stroke="currentColor" stroke-width="1.75">
+            <circle cx="92" cy="64" r="16"/>
+            <circle cx="92" cy="214" r="16"/>
+            <circle cx="468" cy="132" r="16"/>
+            <circle cx="280" cy="132" r="36"/>
+          </g>
+          <circle cx="280" cy="132" r="6" fill="currentColor"/>
+          <g fill="currentColor" font-size="15" text-anchor="middle">
+            <text x="92" y="104">client</text>
+            <text x="92" y="254">client</text>
+            <text x="468" y="172">client</text>
+            <text x="280" y="196">hub</text>
+          </g>
+        </svg>
+      </div>
+    </section>
+
+    <section id="install" class="section">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>Install</p>
+        <h2 data-reveal>One line, then two machines.</h2>
+        <p data-reveal>The script checks the checksum, then installs. Debian and Ubuntu get the package. Everyone else gets a tarball in <code>/usr/local/bin</code>. Set <code>PREFIX</code> to put it somewhere else.</p>
+        <div class="term" data-reveal>
+          <div class="term-bar"><i></i><i></i><i></i><span>two machines</span></div>
+          <pre><span class="c"># hub</span>
+sinkd-srv --sync-root ~/sinkd-data
+
+<span class="c"># the other machine, once the hub prints a 6-digit code</span>
+sinkd pair 192.168.1.20
+sinkd --server 192.168.1.20 --anchor ~/Documents</pre>
+        </div>
+        <p class="note" data-reveal>The hub prints the pair code on stderr. Under systemd that is the journal, not the terminal: <code>journalctl -u sinkd-srv -f</code></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <a href="https://github.com/octo-works/sinkd">GitHub</a>
+    <a href="https://github.com/octo-works/sinkd/releases">Releases</a>
+    <a href="https://github.com/octo-works/sinkd/blob/main/HOW_TO_USE.md">How to use</a>
+  </footer>
+  <script src="main.js"></script>
+</body>
+</html>

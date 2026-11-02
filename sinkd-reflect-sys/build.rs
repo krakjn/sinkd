@@ -42,11 +42,7 @@ so reflect.pc is on the default search path."
         .map(|dir| dir.join("libreflect.a"))
         .find(|path| path.exists())
         .unwrap_or_else(|| panic!("libreflect.a was not in {:?}", reflect.link_paths));
-    println!("cargo:rerun-if-changed={}", src.display());
-    let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    std::fs::copy(&src, out.join("libreflect.a")).expect("copy libreflect.a");
-    println!("cargo:rustc-link-search=native={}", out.display());
-    println!("cargo:rustc-link-lib=static=reflect");
+    link_static_archive(&src);
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     assert!(
@@ -55,14 +51,19 @@ so reflect.pc is on the default search path."
     );
 }
 
+fn link_static_archive(src: &std::path::Path) {
+    println!("cargo:rerun-if-changed={}", src.display());
+    let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    std::fs::copy(src, out.join("libreflect.a")).expect("copy libreflect.a");
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=reflect");
+}
+
 fn link_macos() {
     let (lib, header) = macos_paths();
     let include = header.parent().unwrap().to_path_buf();
     bindgen_header(&header, &[include]);
-    let dir = lib.parent().unwrap();
-    println!("cargo:rustc-link-search=native={}", dir.display());
-    println!("cargo:rustc-link-lib=dylib=reflect");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", dir.display());
+    link_static_archive(&lib);
 }
 
 fn macos_paths() -> (PathBuf, PathBuf) {
@@ -73,14 +74,14 @@ fn macos_paths() -> (PathBuf, PathBuf) {
     roots.push(PathBuf::from("/opt/homebrew/lib"));
     roots.push(PathBuf::from("/usr/local/lib"));
     for lib_dir in roots {
-        let lib = lib_dir.join("libreflect.dylib");
+        let lib = lib_dir.join("libreflect.a");
         let header = lib_dir.join("../include/reflect.h");
         if lib.exists() && header.exists() {
             return (lib, header);
         }
     }
     panic!(
-        "macOS build needs libreflect.dylib and reflect.h. Install ballast/reflect/libreflect, or set REFLECT_LIB_DIR to the directory that contains libreflect.dylib"
+        "macOS build needs libreflect.a and reflect.h. Install the libreflect package, or set REFLECT_LIB_DIR to the directory that contains libreflect.a"
     );
 }
 

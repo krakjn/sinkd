@@ -11,9 +11,15 @@ Both stay in the foreground and print logs to the terminal. Ctrl-C stops the one
 
 ## Install
 
-The release binaries are static. Copy `sinkd` and `sinkd-srv` onto each machine. They do not need libreflect installed to run.
+```bash
+curl -fsSL https://sinkd.octoworks.shop/install.sh | sh
+```
 
-Building from source does. Install the libreflect package so `pkg-config reflect` works, then:
+That downloads the latest release and checks the checksum. Debian and Ubuntu get the `.deb`. Everywhere else gets a tarball in `/usr/local/bin`. Set `PREFIX` to put the binaries somewhere else, or `SINKD_VERSION=vX` to pin a tag.
+
+The release binaries are static. They do not need libreflect installed to run.
+
+Building from source does. On Linux, install the libreflect package so `pkg-config reflect` works. On macOS, put `libreflect.a` and `reflect.h` where Homebrew keeps libraries, or in `/usr/local`, or point `REFLECT_LIB_DIR` at the directory that contains `libreflect.a`. Then:
 
 ```bash
 cargo build --release

@@ -1,0 +1,160 @@
+#!/bin/sh
+# Install sinkd: curl -fsSL https://sinkd.octoworks.shop/install.sh | sh
+#
+#   PREFIX=PATH        tarball install root (default /usr/local)
+#   SINKD_VERSION=vX   a tag instead of the latest release
+#   SINKD_BASE=URL     download directory instead of GitHub Releases
+#   DRY_RUN=1          print what would be installed and exit
+set -eu
+
+repo="https://github.com/octo-works/sinkd"
+prefix="${PREFIX:-/usr/local}"
+prefix=${prefix%/}
+
+say() { printf 'sinkd: %s\n' "$*"; }
+die() { printf 'sinkd: error: %s\n' "$*" >&2; exit 1; }
+
+fetch() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1" -o "$2"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$1" -O "$2"
+    else
+        die "need curl or wget"
+    fi
+}
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        die "need sha256sum or shasum to verify the download"
+    fi
+}
+
+# True when an existing ancestor of $1 is writable, so we can mkdir the rest.
+can_write() {
+    dir=$1
+    while [ ! -e "$dir" ]; do
+        dir=$(dirname "$dir")
+        [ "$dir" != "/" ] || break
+    done
+    [ -w "$dir" ]
+}
+
+run_as_root() {
+    if [ "$(id -u)" = 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        return 1
+    fi
+}
+
+sum_for() {
+    awk -v f="$1" '$2 == f || $2 == "*" f { print $1; exit }' "$tmp/SHA256SUMS"
+}
+
+case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=macos ;;
+    *) die "unsupported OS $(uname -s) (Linux and macOS only; on Windows use WSL)" ;;
+esac
+case "$(uname -m)" in
+    x86_64 | amd64) arch=x86_64; debarch=amd64 ;;
+    aarch64 | arm64) arch=arm64; debarch=arm64 ;;
+    *) die "unsupported architecture $(uname -m)" ;;
+esac
+platform="${os}-${arch}"
+
+if [ -n "${SINKD_BASE:-}" ]; then
+    base=${SINKD_BASE%/}
+elif [ -n "${SINKD_VERSION:-}" ]; then
+    ver=$SINKD_VERSION
+    case "$ver" in
+        v*) ;;
+        *) ver="v$ver" ;;
+    esac
+    base="$repo/releases/download/$ver"
+else
+    base="$repo/releases/latest/download"
+fi
+
+tmp=$(mktemp -d 2>/dev/null || mktemp -d -t sinkd)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS" || die "no SHA256SUMS at $base"
+
+deb=""
+if [ "$os" = linux ] && command -v dpkg >/dev/null 2>&1; then
+    deb=$(awk -v arch="$debarch" '{
+      name = $2
+      sub(/^\*/, "", name)
+      if (name ~ ("^sinkd_.*_" arch "[.]deb$")) { print name; exit }
+    }' "$tmp/SHA256SUMS")
+fi
+
+use_deb=0
+if [ -n "$deb" ] && { [ "$(id -u)" = 0 ] || command -v sudo >/dev/null 2>&1; }; then
+    use_deb=1
+elif [ -n "$deb" ]; then
+    say "no sudo; unpacking the tarball instead"
+fi
+
+tarname="sinkd-${platform}.tar.gz"
+dest="$prefix/bin"
+
+if [ "$use_deb" -eq 1 ]; then
+    if [ -n "${DRY_RUN:-}" ]; then
+        say "would install $deb with dpkg"
+        exit 0
+    fi
+    say "downloading $deb"
+    fetch "$base/$deb" "$tmp/$deb" || die "download failed: $base/$deb"
+    expected=$(sum_for "$deb")
+    [ -n "$expected" ] || die "$deb is missing from SHA256SUMS"
+    actual=$(sha256_of "$tmp/$deb")
+    [ "$expected" = "$actual" ] || die "checksum mismatch for $deb"
+    run_as_root dpkg -i "$tmp/$deb" || die "dpkg failed"
+    say "installed $deb"
+else
+    if [ -z "$(sum_for "$tarname")" ]; then
+        die "no $platform build in this release ($base)"
+    fi
+    if [ -n "${DRY_RUN:-}" ]; then
+        say "would install $tarname into $dest"
+        exit 0
+    fi
+    if ! can_write "$dest" && [ "$(id -u)" != 0 ] && ! command -v sudo >/dev/null 2>&1; then
+        die "cannot write $dest (try sudo, or PREFIX to a directory you own)"
+    fi
+    say "downloading $tarname"
+    fetch "$base/$tarname" "$tmp/$tarname" || die "download failed: $base/$tarname"
+    expected=$(sum_for "$tarname")
+    actual=$(sha256_of "$tmp/$tarname")
+    [ "$expected" = "$actual" ] || die "checksum mismatch for $tarname"
+    mkdir -p "$tmp/extract"
+    tar -xzf "$tmp/$tarname" -C "$tmp/extract"
+    [ -f "$tmp/extract/sinkd" ] && [ -f "$tmp/extract/sinkd-srv" ] || die "archive did not contain sinkd and sinkd-srv"
+    if [ "$(id -u)" = 0 ] || can_write "$dest"; then
+        mkdir -p "$dest"
+        cp "$tmp/extract/sinkd" "$tmp/extract/sinkd-srv" "$dest/"
+        chmod 755 "$dest/sinkd" "$dest/sinkd-srv"
+    else
+        run_as_root mkdir -p "$dest" || die "cannot create $dest"
+        run_as_root cp "$tmp/extract/sinkd" "$tmp/extract/sinkd-srv" "$dest/"
+        run_as_root chmod 755 "$dest/sinkd" "$dest/sinkd-srv"
+    fi
+    say "installed sinkd and sinkd-srv -> $dest"
+    case ":$PATH:" in
+        *":$dest:"*) ;;
+        *) say "note: $dest is not on PATH" ;;
+    esac
+fi
+
+say "hub:    sinkd-srv --sync-root ~/sinkd-data"
+say "client: sinkd pair <hub>"
+say "docs:   https://sinkd.octoworks.shop"

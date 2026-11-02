@@ -11,3 +11,6 @@ pkg/artifacts/
 pkg/**/__gen/
 
 scenario/docker/bin/
+
+# pages assemble
+_site/
