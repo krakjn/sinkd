@@ -1,0 +1,119 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            platform: linux-arm64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            platform: macos-arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            musl-tools clang libclang-dev pkg-config dpkg-dev
+
+      # bindgen needs libclang. The Xcode toolchain has it; Homebrew llvm is not required.
+      - name: macOS libclang
+        if: runner.os == 'macOS'
+        run: echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+
+      - name: libreflect
+        run: curl -fsSL https://reflect.ballast.dev/install.sh | sh
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # .cargo/config.toml defaults to x86_64 musl, so every cargo command passes --target.
+      - name: clippy
+        run: cargo clippy --all-targets --workspace --target ${{ matrix.target }} -- -D warnings
+
+      - name: test
+        run: cargo test --workspace --target ${{ matrix.target }}
+
+      - name: build
+        run: cargo build -p sinkd -p sinkd-srv --release --locked --target ${{ matrix.target }}
+
+      - name: version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            v=$(awk -F'"' '/^version[[:space:]]*=/ { split($2, a, "+"); print a[1]; exit }' sinkd-client/Cargo.toml)
+            echo "version=$v" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: package
+        shell: bash
+        env:
+          SINKD_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          bin="target/${{ matrix.target }}/release"
+          tar -C "$bin" -czf "dist/sinkd-${{ matrix.platform }}.tar.gz" sinkd sinkd-srv
+          if [[ "$(uname -s)" == Linux ]]; then
+            bash pkg/debian/create.sh
+            cp pkg/artifacts/*.deb dist/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --generate-notes -- *

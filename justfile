@@ -54,8 +54,7 @@ site:
     rm -rf _site
     mkdir -p _site/assets
     cp -R site/. _site/
-    cp assets/sinkd-slim.svg _site/assets/
-    cp assets/imgs/sinkd-black-txt.png assets/imgs/sinkd-white-txt.png _site/assets/
+    cp assets/sinkd-slim.svg assets/moonhouse.ttf _site/assets/
     echo "http://127.0.0.1:8765  (Ctrl-C to stop)"
     (sleep 0.4 && xdg-open http://127.0.0.1:8765) >/dev/null 2>&1 &
     exec python3 -m http.server 8765 --directory _site
