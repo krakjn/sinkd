@@ -51,13 +51,19 @@ jobs:
           targets: ${{ matrix.target }}
           components: clippy
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
+      - name: toolchain
+        run: |
+          rustup target add ${{ matrix.target }}
+          rustup show
+          rustc --print cfg --target ${{ matrix.target }} | grep '^target_'
 
       # .cargo/config.toml defaults to x86_64 musl, so every cargo command passes --target.
+      # Build the bins first so the scenario test does not spawn a nested cargo.
       - name: clippy
         run: cargo clippy --all-targets --workspace --target ${{ matrix.target }} -- -D warnings
+
+      - name: build bins for scenario
+        run: cargo build -p sinkd -p sinkd-srv --target ${{ matrix.target }}
 
       - name: test
         run: cargo test --workspace --target ${{ matrix.target }}
