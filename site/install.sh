@@ -2,8 +2,8 @@
 # Install sinkd: curl -fsSL https://sinkd.octoworks.dev/install.sh | sh
 #
 #   PREFIX=PATH        tarball install root (default /usr/local)
-#   SINKD_VERSION=vX   a tag instead of the latest release
-#   SINKD_BASE=URL     download directory instead of GitHub Releases
+#   SINKD_VERSION=vX   a GitHub release tag instead of the site
+#   SINKD_BASE=URL     download directory instead of the site
 #   DRY_RUN=1          print what would be installed and exit
 set -eu
 
@@ -80,7 +80,7 @@ elif [ -n "${SINKD_VERSION:-}" ]; then
     esac
     base="$repo/releases/download/$ver"
 else
-    base="$repo/releases/latest/download"
+    base="https://sinkd.octoworks.dev/dl"
 fi
 
 tmp=$(mktemp -d 2>/dev/null || mktemp -d -t sinkd)

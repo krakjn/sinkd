@@ -103,6 +103,50 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  publish:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > COMMIT
+
+      - name: publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view rolling >/dev/null 2>&1; then
+            gh release delete rolling --yes --cleanup-tag
+          fi
+          gh release create rolling \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title rolling \
+            --notes "Latest main build. The site install uses https://sinkd.octoworks.dev/dl." \
+            dist/*
+
+      - name: trigger workers build
+        env:
+          WORKERS_DEPLOY_HOOK: ${{ secrets.WORKERS_DEPLOY_HOOK }}
+        run: |
+          set -euo pipefail
+          test -n "$WORKERS_DEPLOY_HOOK"
+          curl -fsSL -X POST "$WORKERS_DEPLOY_HOOK"
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
