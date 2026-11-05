@@ -9,10 +9,13 @@ document.querySelectorAll("[data-copy]").forEach((btn) => {
     } catch {
       return;
     }
-    const prev = btn.textContent;
-    btn.textContent = "Copied";
+    const label = btn.querySelector(".copy-label") ?? btn;
+    const prev = label.textContent;
+    label.textContent = "Copied";
+    btn.classList.add("done");
     setTimeout(() => {
-      btn.textContent = prev;
+      label.textContent = prev;
+      btn.classList.remove("done");
     }, 1400);
   });
 });
@@ -68,7 +71,48 @@ fetch("assets/sinkd-slim.svg")
   })
   .catch(() => {});
 
-// The dive: scroll depth drives the water color, the gauge, and the section depth labels.
+// Light rays: uneven spacing and clocks, and a slight lean toward the pointer.
+const rays = document.querySelector(".rays");
+if (rays) {
+  const rand = (a, b) => a + Math.random() * (b - a);
+  [...rays.children].forEach((ray, i, all) => {
+    const slot = 100 / (all.length + 1);
+    ray.style.setProperty("--x", `${(slot * (i + 1) + rand(-slot / 3, slot / 3) - 4).toFixed(1)}%`);
+    ray.style.setProperty("--w", `${rand(4, 13).toFixed(1)}vw`);
+    const dur = rand(28, 46);
+    ray.style.setProperty("--dur", `${dur.toFixed(1)}s`);
+    ray.style.setProperty("--del", `${(-rand(0, dur)).toFixed(1)}s`);
+    ray.style.setProperty("--tilt", `${rand(-2.5, 2.5).toFixed(2)}deg`);
+  });
+
+  if (!reduce) {
+    let target = -11;
+    let lean = -11;
+    let lastMove = -1e9;
+    let visible = false;
+    let raf = 0;
+    addEventListener(
+      "pointermove",
+      (e) => {
+        target = -14 + (e.clientX / innerWidth) * 8;
+        lastMove = performance.now();
+      },
+      { passive: true },
+    );
+    const tick = (t) => {
+      if (t - lastMove > 2500) target = -10.5 + Math.sin(t / 7000) * 3;
+      lean += (target - lean) * 0.025;
+      rays.style.setProperty("--lean", `${lean.toFixed(2)}deg`);
+      raf = visible ? requestAnimationFrame(tick) : 0;
+    };
+    new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      if (visible && !raf) raf = requestAnimationFrame(tick);
+    }).observe(rays.parentElement);
+  }
+}
+
+// The dive: scroll depth drives the water color, the depth chip, and the section depth labels.
 const MAX_M = 200;
 const STOPS = [
   [28, 90, 104],
@@ -77,7 +121,8 @@ const STOPS = [
 ];
 const read = document.querySelector("#depth-read");
 const labels = document.querySelectorAll("[data-depth]");
-const pad = (m) => `${String(Math.round(m)).padStart(3, "0")} m`;
+const digits = (m) => String(Math.round(m)).padStart(3, "0");
+const pad = (m) => `${digits(m)} m`;
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const maxScroll = () => Math.max(1, root.scrollHeight - innerHeight);
 
@@ -86,7 +131,7 @@ function dive() {
   const c = d < 0.5 ? mix(STOPS[0], STOPS[1], d * 2) : mix(STOPS[1], STOPS[2], (d - 0.5) * 2);
   root.style.setProperty("--depth", d.toFixed(4));
   root.style.setProperty("--water", `rgb(${c.join(",")})`);
-  read.textContent = pad(d * MAX_M);
+  read.textContent = digits(d * MAX_M);
 }
 
 function labelDepths() {
@@ -109,9 +154,46 @@ addEventListener(
   },
   { passive: true },
 );
+// Sonar: a dot under the nav link for the section in the middle of the screen.
+const navLinks = [...document.querySelectorAll(".nav a")];
+const sonar = document.querySelector(".sonar");
+let sonarAt = null;
+
+function placeSonar(link, ping) {
+  sonarAt = link;
+  navLinks.forEach((a) => a.classList.toggle("on", a === link));
+  if (!link) {
+    sonar.style.opacity = "0";
+    return;
+  }
+  sonar.style.transform = `translateX(${link.offsetLeft + link.offsetWidth / 2 - 2.5}px)`;
+  sonar.style.opacity = "1";
+  if (ping) {
+    sonar.classList.remove("ping");
+    void sonar.offsetWidth;
+    sonar.classList.add("ping");
+  }
+}
+
+if (sonar && "IntersectionObserver" in window) {
+  const byId = new Map(navLinks.map((a) => [a.hash.slice(1), a]));
+  const watch = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const link = byId.get(entry.target.id) ?? null;
+        if (link !== sonarAt) placeSonar(link, true);
+      });
+    },
+    { rootMargin: "-45% 0px -50% 0px" },
+  );
+  document.querySelectorAll(".hero, main > section").forEach((s) => watch.observe(s));
+}
+
 addEventListener("resize", () => {
   labelDepths();
   dive();
+  if (sonar) placeSonar(sonarAt, false);
 });
 addEventListener("load", labelDepths);
 document.fonts?.ready.then(labelDepths);
