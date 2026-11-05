@@ -5,7 +5,12 @@ use clap::{Parser, Subcommand};
 use sinkd_core::{expand, load_server, notify, runtime_dir, socket_path, ServerOverrides};
 
 #[derive(Parser)]
-#[command(name = "sinkd-srv", about = "Sinkd sync server. Stays in the foreground.")]
+#[command(
+    name = "sinkd-srv",
+    version,
+    propagate_version = true,
+    about = "Sinkd sync server. Stays in the foreground."
+)]
 struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,

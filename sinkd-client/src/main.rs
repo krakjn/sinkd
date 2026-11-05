@@ -7,7 +7,12 @@ use sinkd_core::{expand, runtime_dir, state_dir};
 use sinkd_reflect::{sync_ssh, Opts};
 
 #[derive(Parser)]
-#[command(name = "sinkd", about = "Watch folders and sync them to a sinkd server")]
+#[command(
+    name = "sinkd",
+    version,
+    propagate_version = true,
+    about = "Watch folders and sync them to a sinkd server"
+)]
 struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,
