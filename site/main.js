@@ -37,16 +37,6 @@ if (reduce || !("IntersectionObserver" in window)) {
   reveal.forEach((el) => io.observe(el));
 }
 
-const ver = document.querySelector("#version");
-fetch("https://api.github.com/repos/octo-works/sinkd/releases/latest")
-  .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-  .then((rel) => {
-    ver.textContent = rel.tag_name;
-    ver.hidden = false;
-    ver.href = rel.html_url;
-  })
-  .catch(() => {});
-
 // Coral in a current: inline the logo so the branches can move apart from the anchor.
 const CORAL = new Set([4, 5, 10, 11, 20, 21, 22, 23, 24, 26, 34, 35, 36, 37, 42, 43].map((n) => `path${n}`));
 const mark = document.querySelector("#mark");
