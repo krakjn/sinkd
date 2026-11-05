@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Assemble the static site and fill _site/dl from the rolling prerelease.
-# Exits 1 unless that release was built from this commit, so a push-triggered
-# Workers build does not deploy before GitHub Actions has published the binaries.
+# When that release is from an older commit (the push-triggered Workers build
+# runs before GitHub Actions publishes), writes .skip-deploy and exits 0 so
+# scripts/deploy-site.sh skips wrangler; the deploy-hook build ships it.
 #
 # Private repo: set GITHUB_TOKEN (or GH_TOKEN) in Workers Builds variables.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
+rm -f .skip-deploy
 bash "$root/scripts/assemble-site.sh"
 
 gh_token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
@@ -60,8 +62,9 @@ PY
 
 commit=$(tr -d '[:space:]' < _site/dl/COMMIT)
 if [ "$commit" != "$head" ]; then
-    printf 'rolling COMMIT %s does not match HEAD %s (wait for publish job or rebuild after main catches up)\n' "$commit" "$head" >&2
-    exit 1
+    printf 'rolling COMMIT %s does not match HEAD %s; skipping deploy until the deploy hook runs\n' "$commit" "$head"
+    touch .skip-deploy
+    exit 0
 fi
 if [ ! -s _site/dl/SHA256SUMS ]; then
     echo "SHA256SUMS missing from rolling release" >&2
