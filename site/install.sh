@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install sinkd: curl -fsSL https://sinkd.octoworks.shop/install.sh | sh
+# Install sinkd: curl -fsSL https://sinkd.octoworks.dev/install.sh | sh
 #
 #   PREFIX=PATH        tarball install root (default /usr/local)
 #   SINKD_VERSION=vX   a tag instead of the latest release
@@ -157,4 +157,4 @@ fi
 
 say "hub:    sinkd-srv --sync-root ~/sinkd-data"
 say "client: sinkd pair <hub>"
-say "docs:   https://sinkd.octoworks.shop"
+say "docs:   https://sinkd.octoworks.dev"

@@ -12,7 +12,7 @@ Both stay in the foreground and print logs to the terminal. Ctrl-C stops the one
 ## Install
 
 ```bash
-curl -fsSL https://sinkd.octoworks.shop/install.sh | sh
+curl -fsSL https://sinkd.octoworks.dev/install.sh | sh
 ```
 
 That downloads the latest release and checks the checksum. Debian and Ubuntu get the `.deb`. Everywhere else gets a tarball in `/usr/local/bin`. Set `PREFIX` to put the binaries somewhere else, or `SINKD_VERSION=vX` to pin a tag.

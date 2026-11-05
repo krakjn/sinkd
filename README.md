@@ -39,10 +39,10 @@ Both stay in the foreground and log to stderr. Ctrl-C stops them. `--config` poi
 ### Installation
 
 ```bash
-curl -fsSL https://sinkd.octoworks.shop/install.sh | sh
+curl -fsSL https://sinkd.octoworks.dev/install.sh | sh
 ```
 
-That is the release build. The site is [sinkd.octoworks.shop](https://sinkd.octoworks.shop).
+That is the release build. The site is [sinkd.octoworks.dev](https://sinkd.octoworks.dev).
 
 **Linux:** `pkg/debian/create.sh` and `pkg/arch/create.sh` package the static musl build. Nothing else is required at runtime. `just test-docker` runs the sync scenarios in Alpine.
 
