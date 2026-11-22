@@ -1,5 +1,5 @@
-# Minimum supported Rust for lint suggestions (match CI stable).
-msrv = "1.90"
+# Minimum supported Rust for lint suggestions (match CI).
+msrv = "1.100"
 
 # Complexity / size budgets — tune after first clippy run.
 cognitive-complexity-threshold = 25

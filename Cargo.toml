@@ -18,7 +18,7 @@ repository = "https://github.com/octo-works/sinkd"
 readme = "README.md"
 keywords = ["sync", "libreflect", "zenoh", "filesystem"]
 categories = ["filesystem"]
-rust-version = "1.90"
+rust-version = "1.100"
 
 [workspace.dependencies]
 log = { version = "0.4", features = ["std"] }

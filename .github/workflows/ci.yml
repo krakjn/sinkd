@@ -46,16 +46,10 @@ jobs:
       - name: libreflect
         run: curl -fsSL https://reflect.ballast.dev/install.sh | sh
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: ${{ matrix.target }}
           components: clippy
-
-      - name: toolchain
-        run: |
-          rustup target add ${{ matrix.target }}
-          rustup show
-          rustc --print cfg --target ${{ matrix.target }} | grep '^target_'
 
       # .cargo/config.toml defaults to x86_64 musl, so every cargo command passes --target.
       # Build the bins first so the scenario test does not spawn a nested cargo.
@@ -105,7 +99,7 @@ jobs:
   
   bump:
     needs: build
-    if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'chore: bump version')"
+    if: "github.event_name == 'push' && github.ref_type == 'branch' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'chore: bump version')"
     runs-on: ubuntu-24.04
     permissions:
       contents: write

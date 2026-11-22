@@ -17,16 +17,30 @@ impl Drop for Stop {
     }
 }
 
-fn bin(name: &str) -> PathBuf {
-    let mut path = std::env::current_exe().expect("test exe");
-    path.pop();
-    if path.file_name().and_then(|s| s.to_str()) == Some("deps") {
-        path.pop();
+fn target_triple() -> &'static str {
+    if cfg!(all(target_arch = "x86_64", target_os = "linux", target_env = "musl")) {
+        "x86_64-unknown-linux-musl"
+    } else if cfg!(all(target_arch = "aarch64", target_os = "linux", target_env = "musl")) {
+        "aarch64-unknown-linux-musl"
+    } else if cfg!(all(target_arch = "aarch64", target_os = "macos")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_arch = "x86_64", target_os = "macos")) {
+        "x86_64-apple-darwin"
+    } else {
+        panic!("no target triple for this build")
     }
-    path.push(name);
+}
+
+fn bin(name: &str) -> PathBuf {
+    // .cargo/config.toml defaults to x86_64 musl. A bare cargo build on the
+    // macOS runner looks for that target and fails.
+    let triple = target_triple();
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop();
+    path.extend(["target", triple, "debug", name]);
     if !path.exists() {
         let status = Command::new("cargo")
-            .args(["build", "-p", "sinkd", "-p", "sinkd-srv"])
+            .args(["build", "-p", "sinkd", "-p", "sinkd-srv", "--target", triple])
             .status()
             .expect("cargo build");
         assert!(status.success(), "cargo build sinkd bins");
