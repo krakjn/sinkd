@@ -1,6 +1,6 @@
 [package]
 name = "sinkd-proto"
-version = "0.3.6"
+version = "0.3.7"
 description = "Versioned control messages for sinkd"
 edition.workspace = true
 license.workspace = true

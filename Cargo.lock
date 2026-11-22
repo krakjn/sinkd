@@ -2497,7 +2497,7 @@ dependencies = [
 
 [[package]]
 name = "scenario"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "tempfile",
 ]
@@ -2790,7 +2790,7 @@ checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
 
 [[package]]
 name = "sinkd"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "clap",
  "env_logger",
@@ -2806,7 +2806,7 @@ dependencies = [
 
 [[package]]
 name = "sinkd-core"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "libc",
  "log",
@@ -2821,7 +2821,7 @@ dependencies = [
 
 [[package]]
 name = "sinkd-proto"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "postcard",
  "serde",
@@ -2829,7 +2829,7 @@ dependencies = [
 
 [[package]]
 name = "sinkd-reflect"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "libc",
  "sinkd-reflect-sys",
@@ -2838,7 +2838,7 @@ dependencies = [
 
 [[package]]
 name = "sinkd-reflect-sys"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -2846,7 +2846,7 @@ dependencies = [
 
 [[package]]
 name = "sinkd-srv"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "clap",
  "env_logger",
