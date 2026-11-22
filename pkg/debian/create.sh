@@ -17,7 +17,7 @@ fi
 if [[ -n "${SINKD_VERSION:-}" ]]; then
   VERSION="${SINKD_VERSION}"
 elif command -v bump >/dev/null 2>&1; then
-  VERSION=$(bump -b)
+  VERSION=$(bump print)
 else
   # Last-resort fallback: lift the base version from Cargo.toml.
   VERSION=$(awk -F'"' '/^version[[:space:]]*=/ { split($2, a, "+"); print a[1]; exit }' "${ROOT}/sinkd-client/Cargo.toml")

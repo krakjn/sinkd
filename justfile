@@ -2,6 +2,7 @@ _:
     @just --list
 
 version:
+    # currently versioned together, plan to break this out
     @bump update scenario/Cargo.toml
     @bump update sinkd-client/Cargo.toml
     @bump update sinkd-server/Cargo.toml
@@ -13,14 +14,10 @@ version:
 bump PART:
     #!/usr/bin/env bash
     set -euo pipefail
-    TREEISH=$(git rev-parse --short HEAD)
-    bump {{PART}} --if-changed-from {{TREEISH}} scenario/Cargo.toml
-    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-client/Cargo.toml
-    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-server/Cargo.toml
-    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-core/Cargo.toml
-    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-proto/Cargo.toml
-    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-reflect/Cargo.toml
-    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-reflect-sys/Cargo.toml
+    # Parent commit. CI sets TREEISH to github.event.before.
+    treeish="${TREEISH:-$(git rev-parse --short HEAD^)}"
+    bump {{PART}} --if-changed-from "$treeish" bump.toml
+    just version
 
 lint:
     cargo clippy --all-targets --all-features --workspace -- -D warnings

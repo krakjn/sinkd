@@ -105,13 +105,34 @@ jobs:
   
   bump:
     needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'chore: bump version')
     runs-on: ubuntu-24.04
-    # upon PR merged and closed or tag pushed
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true || github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: krakjn/bump@v9
+      - name: install just
+        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
       - name: bump minor
-        run: just bump minor
+        env:
+          TREEISH: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$TREEISH" = "0000000000000000000000000000000000000000" ]; then
+            echo "no parent commit; skipping bump"
+            exit 0
+          fi
+          just bump minor
+      - name: commit bump
+        run: |
+          set -euo pipefail
+          git add bump.toml Cargo.lock scenario/Cargo.toml sinkd-client/Cargo.toml sinkd-server/Cargo.toml sinkd-core/Cargo.toml sinkd-proto/Cargo.toml sinkd-reflect/Cargo.toml sinkd-reflect-sys/Cargo.toml
+          git diff --cached --quiet && exit 0
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore: bump version"
+          git push
 
   publish:
     if: github.ref == 'refs/heads/main'
@@ -133,6 +154,14 @@ jobs:
           cd dist
           sha256sum -- * > SHA256SUMS
           printf '%s\n' "$GITHUB_SHA" > COMMIT
+          deb=$(echo sinkd_*_amd64.deb)
+          if [ ! -f "$deb" ]; then
+            echo "amd64 deb missing; cannot write VERSION" >&2
+            exit 1
+          fi
+          ver=${deb#sinkd_}
+          ver=${ver%_amd64.deb}
+          printf '%s\n' "$ver" > VERSION
 
       - name: publish rolling release
         env:
