@@ -1,6 +1,6 @@
 [package]
 name = "sinkd-reflect"
-version = "0.0.5"
+version = "0.3.6"
 description = "Safe wrapper around libreflect"
 edition.workspace = true
 license.workspace = true

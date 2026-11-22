@@ -10,6 +10,18 @@ version:
     @bump update sinkd-reflect/Cargo.toml
     @bump update sinkd-reflect-sys/Cargo.toml
 
+bump PART:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TREEISH=$(git rev-parse --short HEAD)
+    bump {{PART}} --if-changed-from {{TREEISH}} scenario/Cargo.toml
+    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-client/Cargo.toml
+    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-server/Cargo.toml
+    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-core/Cargo.toml
+    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-proto/Cargo.toml
+    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-reflect/Cargo.toml
+    bump {{PART}} --if-changed-from {{TREEISH}} sinkd-reflect-sys/Cargo.toml
+
 lint:
     cargo clippy --all-targets --all-features --workspace -- -D warnings
 

@@ -1,6 +1,6 @@
 [package]
 name = "sinkd-srv"
-version = "0.0.5"
+version = "0.3.6"
 description = "sinkd sync server"
 edition.workspace = true
 license.workspace = true
