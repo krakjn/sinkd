@@ -17,14 +17,13 @@
       <img src="assets/sinkd-slim.svg" alt="" width="24" height="24">
       <span class="wordmark">sinkd</span>
     </a>
-    <nav class="nav" aria-label="Sections">
-      <a href="#why">Why</a>
-      <a href="#demo">Demo</a>
-      <a href="#how">How</a>
-      <a href="#install">Install</a>
+    <nav class="nav" aria-label="Pages">
       <a href="downloads.html">Downloads</a>
-      <i class="sonar" aria-hidden="true"></i>
     </nav>
+    <a class="source" href="https://github.com/krakjn/sinkd" aria-label="Source">
+      <svg class="git" viewBox="0 0 24 24" aria-hidden="true"><path d="M23.546 10.93 13.067.452c-.604-.603-1.582-.603-2.188 0L8.708 2.627l2.76 2.76c.645-.215 1.379-.07 1.889.441.516.515.658 1.258.438 1.9l2.658 2.66c.645-.223 1.387-.078 1.9.435.721.72.721 1.884 0 2.604-.719.719-1.881.719-2.6 0-.539-.541-.674-1.337-.404-1.996L12.86 8.955v6.525c.176.086.342.203.488.348.713.721.713 1.883 0 2.6-.719.721-1.889.721-2.609 0-.719-.719-.719-1.879 0-2.598.182-.182.387-.324.605-.426V8.835c-.217-.103-.42-.249-.6-.436-.535-.53-.668-1.316-.396-1.979L7.636 3.7.45 10.881c-.6.605-.6 1.584 0 2.189l10.48 10.477c.604.604 1.582.604 2.186 0l10.43-10.43c.605-.603.605-1.582 0-2.187"/></svg>
+      <span>__VERSION__</span>
+    </a>
     <span class="depth-chip" title="How far down the page you are"><b id="depth-read">000</b><span>m</span></span>
     <i class="waterline" aria-hidden="true"></i>
   </header>
@@ -50,14 +49,13 @@
           <span class="copy-label">Copy</span>
         </button>
       </div>
-      <p class="release">__VERSION__</p>
     </div>
   </section>
 
   <main>
     <section id="why" class="section">
       <div class="wrap">
-        <p class="eyebrow" data-reveal><span class="num">01</span> Private <span class="depth" data-depth></span></p>
+        <p class="eyebrow" data-reveal><span class="num">01</span> Private</p>
         <h2 data-reveal>Your machines. Your files.</h2>
         <ul class="cards">
           <li class="card" data-reveal>
@@ -91,7 +89,7 @@
 
     <section id="demo" class="section">
       <div class="wrap">
-        <p class="eyebrow" data-reveal><span class="num">02</span> Live <span class="depth" data-depth></span></p>
+        <p class="eyebrow" data-reveal><span class="num">02</span> Live</p>
         <h2 data-reveal>Save it. It shows up.</h2>
         <div class="demo" data-reveal>
           <div class="machine" id="laptop">
@@ -131,7 +129,7 @@
     <section id="how" class="section">
       <div class="wrap split">
         <div>
-          <p class="eyebrow" data-reveal><span class="num">03</span> Shape <span class="depth" data-depth></span></p>
+          <p class="eyebrow" data-reveal><span class="num">03</span> Shape</p>
           <h2 data-reveal>One hub. The rest follow.</h2>
           <p data-reveal>Run <code>sinkd-srv</code> on the machine that should hold the files. Run <code>sinkd</code> everywhere else, and name the folders to watch. A save is pushed. A file that shows up on the hub is pulled. A delete on one side becomes a delete on the other.</p>
           <p data-reveal>A share is one tree for every client. An anchor is one tree per user. Both live on the hub, under the directory you gave <code>--sync-root</code>.</p>
@@ -166,7 +164,7 @@
 
     <section id="install" class="section">
       <div class="wrap">
-        <p class="eyebrow" data-reveal><span class="num">04</span> Synchronize <span class="depth" data-depth></span></p>
+        <p class="eyebrow" data-reveal><span class="num">04</span> Synchronize</p>
         <h2 data-reveal>One line. Two machines.</h2>
         <p data-reveal>The script checks the checksum, then installs. Debian and Ubuntu get the package. Everyone else gets a tarball in <code>/usr/local/bin</code>. Set <code>PREFIX</code> to put it somewhere else. <a href="downloads.html">Download a specific build</a>.</p>
         <div class="term" data-reveal>

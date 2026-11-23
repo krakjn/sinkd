@@ -40,7 +40,7 @@ if (reduce || !("IntersectionObserver" in window)) {
 // Coral in a current: inline the logo so the branches can move apart from the anchor.
 const CORAL = new Set([4, 5, 10, 11, 20, 21, 22, 23, 24, 26, 34, 35, 36, 37, 42, 43].map((n) => `path${n}`));
 const mark = document.querySelector("#mark");
-fetch("assets/sinkd-slim.svg")
+if (mark) fetch("assets/sinkd-slim.svg")
   .then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
   .then((text) => {
     const svg = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
@@ -102,7 +102,7 @@ if (rays) {
   }
 }
 
-// The dive: scroll depth drives the water color, the depth chip, and the section depth labels.
+// The dive: scroll depth drives the water color, the depth chip, and the waterline.
 const MAX_M = 200;
 const STOPS = [
   [28, 90, 104],
@@ -110,9 +110,7 @@ const STOPS = [
   [4, 8, 11],
 ];
 const read = document.querySelector("#depth-read");
-const labels = document.querySelectorAll("[data-depth]");
 const digits = (m) => String(Math.round(m)).padStart(3, "0");
-const pad = (m) => `${digits(m)} m`;
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const maxScroll = () => Math.max(1, root.scrollHeight - innerHeight);
 
@@ -121,14 +119,7 @@ function dive() {
   const c = d < 0.5 ? mix(STOPS[0], STOPS[1], d * 2) : mix(STOPS[1], STOPS[2], (d - 0.5) * 2);
   root.style.setProperty("--depth", d.toFixed(4));
   root.style.setProperty("--water", `rgb(${c.join(",")})`);
-  read.textContent = digits(d * MAX_M);
-}
-
-function labelDepths() {
-  labels.forEach((el) => {
-    const top = el.closest("section").offsetTop;
-    el.textContent = pad(Math.min(1, Math.max(0, top / maxScroll())) * MAX_M);
-  });
+  if (read) read.textContent = digits(d * MAX_M);
 }
 
 let ticking = false;
@@ -144,50 +135,7 @@ addEventListener(
   },
   { passive: true },
 );
-// Sonar: a dot under the nav link for the section in the middle of the screen.
-const navLinks = [...document.querySelectorAll(".nav a")];
-const sonar = document.querySelector(".sonar");
-let sonarAt = null;
-
-function placeSonar(link, ping) {
-  sonarAt = link;
-  navLinks.forEach((a) => a.classList.toggle("on", a === link));
-  if (!link) {
-    sonar.style.opacity = "0";
-    return;
-  }
-  sonar.style.transform = `translateX(${link.offsetLeft + link.offsetWidth / 2 - 2.5}px)`;
-  sonar.style.opacity = "1";
-  if (ping) {
-    sonar.classList.remove("ping");
-    void sonar.offsetWidth;
-    sonar.classList.add("ping");
-  }
-}
-
-if (sonar && "IntersectionObserver" in window) {
-  const byId = new Map(navLinks.map((a) => [a.hash.slice(1), a]));
-  const watch = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        const link = byId.get(entry.target.id) ?? null;
-        if (link !== sonarAt) placeSonar(link, true);
-      });
-    },
-    { rootMargin: "-45% 0px -50% 0px" },
-  );
-  document.querySelectorAll(".hero, main > section").forEach((s) => watch.observe(s));
-}
-
-addEventListener("resize", () => {
-  labelDepths();
-  dive();
-  if (sonar) placeSonar(sonarAt, false);
-});
-addEventListener("load", labelDepths);
-document.fonts?.ready.then(labelDepths);
-labelDepths();
+addEventListener("resize", dive);
 dive();
 
 document.querySelectorAll(".card").forEach((card) => {
