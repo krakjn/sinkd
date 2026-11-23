@@ -30,6 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      - uses: krakjn/bump@v9
 
       - name: Linux packages
         if: runner.os == 'Linux'
@@ -65,27 +66,16 @@ jobs:
       - name: build
         run: cargo build -p sinkd -p sinkd-srv --release --locked --target ${{ matrix.target }}
 
-      - name: version
-        id: ver
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            v=$(awk -F'"' '/^version[[:space:]]*=/ { split($2, a, "+"); print a[1]; exit }' sinkd-client/Cargo.toml)
-            echo "version=$v" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: package
         shell: bash
-        env:
-          SINKD_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
           bin="target/${{ matrix.target }}/release"
-          tar -C "$bin" -czf "dist/sinkd-${{ matrix.platform }}.tar.gz" sinkd sinkd-srv
+          stage=$(mktemp -d)
+          cp "$bin/sinkd" "$bin/sinkd-srv" pkg/man/sinkd.1 pkg/man/sinkd-srv.1 "$stage/"
+          tar -C "$stage" -czf "dist/sinkd-${{ matrix.platform }}.tar.gz" sinkd sinkd-srv sinkd.1 sinkd-srv.1
+          rm -rf "$stage"
           if [[ "$(uname -s)" == Linux ]]; then
             bash pkg/debian/create.sh
             cp pkg/artifacts/*.deb dist/

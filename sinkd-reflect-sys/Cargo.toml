@@ -1,6 +1,6 @@
 [package]
 name = "sinkd-reflect-sys"
-version = "0.3.7"
+version = "0.4.0"
 description = "Bindgen bindings for the packaged libreflect"
 edition.workspace = true
 license.workspace = true

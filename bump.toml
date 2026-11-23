@@ -14,8 +14,8 @@ prefix = ""
 mode = "semver"
 delimiter = "."
 major = 0
-minor = 3
-patch = 7
+minor = 4
+patch = 0
 
 [phase]
 separator = "-"
@@ -32,7 +32,7 @@ separator = "+"
 
 [timestamp]
 format = "%Y-%m-%d %H:%M:%S %Z"
-last = "2026-11-22 16:50:34 UTC"
+last = "2026-11-23 16:09:47 UTC"
 
 # printed label: shown but never tracked, useful injecting dynamic values
 #  - position: "before-prefix", "after-prefix",

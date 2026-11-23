@@ -1,0 +1,98 @@
+.TH SINKD 1
+.SH NAME
+sinkd \- watch folders and sync them to a sinkd hub
+.SH SYNOPSIS
+.B sinkd
+[\fIoptions\fR]
+.br
+.B sinkd pair
+.I host
+[\fIoptions\fR]
+.br
+.B sinkd stop
+.br
+.B sinkd reload
+.br
+.B sinkd ssh
+.I user@host:/path/
+.B \-\-anchor
+.I path
+[\fB\-\-delete\fR]
+.SH DESCRIPTION
+.B sinkd
+watches folders on this machine and keeps them in step with a
+.B sinkd-srv
+hub.
+With no subcommand it runs in the foreground until Ctrl-C.
+The hub address comes from
+.BR \-\-server ,
+from
+.IR client.toml ,
+or from the last successful
+.BR pair .
+A folder still has to be named with
+.B \-\-anchor
+or in
+.IR client.toml .
+.SH OPTIONS
+.TP
+.BI \-\-config " path"
+Use this config file instead of the default.
+.TP
+.BI \-\-state-dir " path"
+Keys, the remembered hub, and sync state. Default
+.IR ~/.local/state/sinkd ,
+or
+.BR SINKD_STATE_DIR .
+.TP
+.BI \-\-runtime-dir " path"
+Directory for the control socket. Default
+.BR $XDG_RUNTIME_DIR .
+.TP
+.BI \-\-server " host"
+Hub hostname or IP. Implies run when no subcommand is given.
+.TP
+.BI \-\-anchor " path"
+Folder to watch. Repeat for more than one. Personal tree on the hub, one copy per user.
+.TP
+.BI \-\-share " path"
+Folder shared as one tree for every client. Repeat for more than one.
+.SH COMMANDS
+.TP
+.BI pair " host"
+Exchange keys with the hub at
+.IR host .
+The hub prints a 6-digit code; type it when asked.
+.B \-\-code
+supplies the code without a prompt.
+.B \-\-pair-port
+overrides port 7449.
+.TP
+.B stop
+Ask the running
+.B sinkd
+to exit.
+.TP
+.B reload
+Ask the running
+.B sinkd
+to reload. New folders are not picked up yet; stop it and start it again.
+.TP
+.BI ssh " user@host:/path/"
+One libreflect copy over SSH. Does not pair, watch, or use the hub.
+.B \-\-anchor
+is the local folder.
+.B \-\-delete
+removes files at the destination that are gone locally.
+.SH FILES
+.TP
+.I ~/.config/sinkd/client.toml
+Optional server, anchors, and shares. Flags override the file.
+.TP
+.I ~/.local/state/sinkd/
+Keys and the remembered hub.
+.TP
+.I ~/.local/state/sinkd/conflicts/
+Edits set aside when the hub won.
+.SH SEE ALSO
+.BR sinkd-srv (1)

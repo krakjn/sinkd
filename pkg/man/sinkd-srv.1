@@ -1,0 +1,72 @@
+.TH SINKD-SRV 1
+.SH NAME
+sinkd-srv \- sinkd hub. Stores the files and stays in the foreground.
+.SH SYNOPSIS
+.B sinkd-srv
+[\fIoptions\fR]
+.br
+.B sinkd-srv stop
+.br
+.B sinkd-srv reload
+.SH DESCRIPTION
+.B sinkd-srv
+is the hub. It stores every synced file under
+.I ~/sinkd-data
+unless
+.B \-\-sync-root
+says otherwise, and it listens on every interface.
+When a client runs
+.BR sinkd\ pair ,
+this process prints a 6-digit code on stderr. Under systemd that is the journal.
+.SH OPTIONS
+.TP
+.BI \-\-config " path"
+Use this config file instead of the default.
+.TP
+.BI \-\-state-dir " path"
+Hub state. Default
+.IR ~/.local/state/sinkd-srv .
+.TP
+.BI \-\-runtime-dir " path"
+Directory for the control socket. Default
+.BR $XDG_RUNTIME_DIR .
+.TP
+.BI \-\-sync-root " path"
+Where synced files are stored. Default
+.IR ~/sinkd-data .
+.TP
+.BI \-\-bind " addr"
+Address to listen on. Default
+.IR 0.0.0.0 .
+.TP
+.BI \-\-zenoh-port " port"
+Control port. Default 7447.
+.TP
+.BI \-\-data-port " port"
+File-data port. Default 7448.
+.TP
+.BI \-\-pair-port " port"
+Pairing port. Default 7449.
+.TP
+.BI \-\-pair-code " code"
+Fixed pair code, for scripts. Leave unset and the server prints a random code.
+.SH COMMANDS
+.TP
+.B stop
+Ask the running hub to exit.
+.TP
+.B reload
+Reload the peer list from state.
+.SH FILES
+.TP
+.I ~/.config/sinkd/server.toml
+Optional bind address, ports, and sync root. Flags override the file.
+.TP
+.I ~/sinkd-data/
+The store. A personal tree lives under a directory for that user. A share lives under
+.IR share/ .
+.TP
+.I ~/.local/state/sinkd-srv/
+Hub keys and peer state.
+.SH SEE ALSO
+.BR sinkd (1)

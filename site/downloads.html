@@ -17,6 +17,7 @@
       <span class="wordmark">sinkd</span>
     </a>
     <nav class="nav" aria-label="Pages">
+      <a href="docs.html">Docs</a>
       <a href="downloads.html" aria-current="page">Downloads</a>
     </nav>
     <a class="source" href="https://github.com/krakjn/sinkd" aria-label="Source">
@@ -36,8 +37,13 @@
         <div class="cmd">
           <div class="cmd-line">
             <span class="prompt" aria-hidden="true">$</span>
-            <code><span class="t-cmd">curl</span> <span class="t-flag">-fsSL</span> <span class="t-url">https://<u>sinkd.octoworks.dev</u>/install.sh</span> <span class="t-pipe">| sh</span></code>
+            <code id="dl-cmd"><span class="t-cmd">curl</span> <span class="t-flag">-fsSL</span> <span class="t-url">https://<u>sinkd.octoworks.dev</u>/install.sh</span> <span class="t-pipe">| sh</span></code>
           </div>
+          <button type="button" class="copy" data-copy="#dl-cmd" aria-label="Copy install command">
+            <svg class="ico ico-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>
+            <svg class="ico ico-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+            <span class="copy-label">Copy</span>
+          </button>
         </div>
         <ul class="downloads">
           <!-- downloads -->

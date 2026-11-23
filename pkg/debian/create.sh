@@ -2,6 +2,8 @@
 # Build a .deb into pkg/artifacts/.
 # The binary is a static musl build with libreflect.a linked in. No runtime library deps.
 # Set SINKD_BIN / SINKD_SRV_BIN to override.
+# Version is `bump print` from https://github.com/krakjn/bump (bump.toml).
+# Homepage is https://sinkd.octoworks.dev: that DNS name is this repo's GitHub Pages site.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -12,21 +14,12 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   exit 1
 fi
 
-# Allow callers (CI, container builds) to inject the version directly to avoid
-# requiring `bump` on the build host.
-if [[ -n "${SINKD_VERSION:-}" ]]; then
-  VERSION="${SINKD_VERSION}"
-elif command -v bump >/dev/null 2>&1; then
-  VERSION=$(bump print)
-else
-  # Last-resort fallback: lift the base version from Cargo.toml.
-  VERSION=$(awk -F'"' '/^version[[:space:]]*=/ { split($2, a, "+"); print a[1]; exit }' "${ROOT}/sinkd-client/Cargo.toml")
-fi
-
-if [[ -z "${VERSION}" ]]; then
-  echo "could not determine version (set SINKD_VERSION, install bump, or fix Cargo.toml)." >&2
+if ! command -v bump >/dev/null 2>&1; then
+  echo "bump not found. Install bump (https://github.com/krakjn/bump) and ensure it is on PATH." >&2
   exit 1
 fi
+
+VERSION=$(bump print)
 
 DEB_ARCH=$(dpkg --print-architecture)
 case "${DEB_ARCH}" in
@@ -70,12 +63,15 @@ install -m 644 "${ROOT}/sinkd-cfg/server.toml" "${STAGE}/etc/sinkd/server.toml"
 install -m 644 "${ROOT}/sinkd-cfg/client.toml" "${STAGE}/usr/share/sinkd/client.toml"
 install -m 644 "${ROOT}/pkg/systemd/sinkd-srv.service" "${STAGE}/usr/lib/systemd/system/sinkd-srv.service"
 install -m 644 "${ROOT}/pkg/systemd/sinkd.service" "${STAGE}/usr/lib/systemd/user/sinkd.service"
+install -d "${STAGE}/usr/share/man/man1"
+install -m 644 "${ROOT}/pkg/man/sinkd.1" "${ROOT}/pkg/man/sinkd-srv.1" "${STAGE}/usr/share/man/man1/"
 
 cat >"${STAGE}/DEBIAN/control" <<EOF
 Package: sinkd
 Version: ${VERSION}
 Architecture: ${DEB_ARCH}
 Maintainer: Tony <krakjn@gmail.com>
+Homepage: https://sinkd.octoworks.dev
 Section: utils
 Priority: optional
 Description: Deployable Cloud, file sync daemon.

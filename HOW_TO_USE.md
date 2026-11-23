@@ -15,7 +15,7 @@ Both stay in the foreground and print logs to the terminal. Ctrl-C stops the one
 curl -fsSL https://sinkd.octoworks.dev/install.sh | sh
 ```
 
-That downloads the latest release and checks the checksum. Debian and Ubuntu get the `.deb`. Everywhere else gets a tarball in `/usr/local/bin`. Set `PREFIX` to put the binaries somewhere else, or `SINKD_VERSION=vX` to pin a tag.
+That downloads the latest release and checks the checksum. Debian and Ubuntu get the `.deb`. Arch gets the package when one is published, and otherwise the tarball. macOS gets a tarball in `/usr/local/bin`. Set `PREFIX` to put the binaries somewhere else, or `SINKD_VERSION=vX` to pin a tag. `man sinkd` and `man sinkd-srv` cover the flags.
 
 The release binaries are static. They do not need libreflect installed to run.
 

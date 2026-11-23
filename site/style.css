@@ -91,7 +91,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .brand img { filter: invert(1); }
 .brand .wordmark { font-size: 1.35rem; }
 
-.nav { display: flex; margin-left: auto; }
+.nav { display: flex; gap: 0.15rem; margin-left: auto; }
 
 .nav a,
 .source,
@@ -663,6 +663,12 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 .page { padding-top: 8rem; }
 
+.page .cmd { width: fit-content; margin-inline: auto; }
+
+.page h3 { margin-top: 2.2rem; }
+.page h3 + p { margin-bottom: 0.8rem; }
+.page .term { margin-top: 0; }
+
 .downloads {
   list-style: none;
   padding: 0;
@@ -707,9 +713,19 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .js .card[data-reveal]:nth-child(5) { transition-delay: 0.32s; }
 
 @media (max-width: 680px) {
+<<<<<<< HEAD
   .topbar { gap: 0.35rem; padding-left: 0.7rem; }
   .nav a { letter-spacing: 0.08em; margin-inline-end: -0.08em; padding: 0 0.55rem; }
   .source span { display: none; }
+=======
+  .topbar { gap: 0.25rem; padding-left: 0.65rem; padding-right: 0.3rem; }
+  .brand .wordmark { font-size: 1.15rem; }
+  .nav { gap: 0; }
+  .nav a { letter-spacing: 0.06em; margin-inline-end: -0.06em; padding: 0 0.4rem; }
+  .source { padding: 0 0.45rem; }
+  .source span { display: none; }
+  .depth-chip { padding: 0 0.5rem; }
+>>>>>>> 43112f2 (site: top bar downloads, source link, and depth chip)
 }
 
 @media (max-width: 800px) {
