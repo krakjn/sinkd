@@ -7,7 +7,7 @@
 #   DRY_RUN=1          print what would be installed and exit
 set -eu
 
-repo="https://github.com/octo-works/sinkd"
+repo="https://github.com/krakjn/sinkd"
 prefix="${PREFIX:-/usr/local}"
 prefix=${prefix%/}
 

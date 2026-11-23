@@ -22,8 +22,6 @@ bump PART:
 lint:
     cargo clippy --all-targets --all-features --workspace -- -D warnings
 
-test: test-local
-
 test-local:
     cargo test --workspace
 
@@ -49,11 +47,12 @@ musl:
     cp {{target_dir}}/x86_64-unknown-linux-musl/release/sinkd scenario/docker/bin/sinkd
     cp {{target_dir}}/x86_64-unknown-linux-musl/release/sinkd-srv scenario/docker/bin/sinkd-srv
 
-docker-build: musl
+# docker build for musl and scenario
+build: musl
     docker build -t sinkd-scenario scenario/docker
 
 # Alpine containers: pair, push, fan-out, delete, conflict, late joiner, restart, share.
-test-docker: docker-build
+test: build
     bash scenario/docker/run.sh
 
 # Assemble the pages site and open it. Ctrl-C stops the server.
@@ -64,3 +63,9 @@ site:
     echo "http://127.0.0.1:8765  (Ctrl-C to stop)"
     (sleep 0.4 && xdg-open http://127.0.0.1:8765) >/dev/null 2>&1 &
     exec python3 -m http.server 8765 --directory _site
+
+clean:
+    cargo clean --workspace
+    rm -rf scenario/docker/bin
+    rm -rf _site
+    rm -rf target

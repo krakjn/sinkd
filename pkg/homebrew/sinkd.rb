@@ -5,8 +5,8 @@
 
 class Sinkd < Formula
   desc "Hub-and-spoke file sync (Zenoh control, libreflect data)"
-  homepage "https://github.com/octo-works/sinkd"
-  head "https://github.com/octo-works/sinkd.git", branch: "main"
+  homepage "https://github.com/krakjn/sinkd"
+  head "https://github.com/krakjn/sinkd.git", branch: "main"
 
   depends_on "rust" => :build
   depends_on "pkgconf" => :build
