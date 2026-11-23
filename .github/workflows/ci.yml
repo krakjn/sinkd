@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["*"]
 
 permissions:
   contents: read
@@ -97,36 +97,36 @@ jobs:
           path: dist/*
           if-no-files-found: error
   
-  bump:
-    needs: build
-    if: "github.event_name == 'push' && github.ref_type == 'branch' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'chore: bump version')"
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: krakjn/bump@v9
-      - name: install just
-        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
-      - name: bump minor
-        env:
-          TREEISH: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          if [ "$TREEISH" = "0000000000000000000000000000000000000000" ]; then
-            echo "no parent commit; skipping bump"
-            exit 0
-          fi
-          just bump minor
-      - name: commit bump
-        run: |
-          set -euo pipefail
-          git add bump.toml Cargo.lock scenario/Cargo.toml sinkd-client/Cargo.toml sinkd-server/Cargo.toml sinkd-core/Cargo.toml sinkd-proto/Cargo.toml sinkd-reflect/Cargo.toml sinkd-reflect-sys/Cargo.toml
-          git diff --cached --quiet && exit 0
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore: bump version"
-          git push
+  # bump:
+  #   needs: build
+  #   if: "github.event_name == 'push' && github.ref_type == 'branch' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'chore: bump version')"
+  #   runs-on: ubuntu-24.04
+  #   permissions:
+  #     contents: write
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #       with:
+  #         fetch-depth: 0
+  #     - uses: krakjn/bump@v9
+  #     - name: install just
+  #       run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+  #     - name: bump minor
+  #       env:
+  #         TREEISH: ${{ github.event.before }}
+  #       run: |
+  #         set -euo pipefail
+  #         if [ "$TREEISH" = "0000000000000000000000000000000000000000" ]; then
+  #           echo "no parent commit; skipping bump"
+  #           exit 0
+  #         fi
+  #         just bump minor
+  #     - name: commit bump
+  #       run: |
+  #         set -euo pipefail
+  #         git add bump.toml Cargo.lock scenario/Cargo.toml sinkd-client/Cargo.toml sinkd-server/Cargo.toml sinkd-core/Cargo.toml sinkd-proto/Cargo.toml sinkd-reflect/Cargo.toml sinkd-reflect-sys/Cargo.toml
+  #         git diff --cached --quiet && exit 0
+  #         git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore: bump version"
+  #         git push
 
   publish:
     if: github.ref == 'refs/heads/main'
@@ -178,7 +178,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-24.04
     permissions:
