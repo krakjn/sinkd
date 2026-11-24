@@ -1,0 +1,42 @@
+_:
+    @just --list
+
+# Release binaries the Linux packages wrap. .cargo/config.toml selects musl.
+bins:
+    cargo build --manifest-path {{source_directory()}}/../Cargo.toml -p sinkd -p sinkd-srv --release --locked
+
+# Arch package (.pkg.tar.zst) into pkg/artifacts/.
+arch: bins
+    bash {{source_directory()}}/arch/create.sh
+
+# Debian package (.deb) into pkg/artifacts/.
+debian: bins
+    bash {{source_directory()}}/debian/create.sh
+
+# Homebrew bottle (.bottle.tar.gz) into pkg/artifacts/.
+# brew install puts the formula in Homebrew's prefix so `brew bottle` can pack it.
+brew:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v brew >/dev/null 2>&1; then
+      echo "brew not found." >&2
+      exit 1
+    fi
+    out="{{source_directory()}}/artifacts"
+    mkdir -p "$out"
+    formula="{{source_directory()}}/brew/sinkd.rb"
+    brew install --HEAD --build-bottle "$formula"
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    cd "$dir"
+    brew bottle --json sinkd > bottle.json
+    shopt -s nullglob
+    bottles=(./*.bottle.tar.gz)
+    if [[ ${#bottles[@]} -eq 0 ]]; then
+      echo "brew bottle wrote no archive" >&2
+      exit 1
+    fi
+    mv -f "${bottles[@]}" "$out/"
+    printf 'Wrote %s\n' "$out/${bottles[0]##*/}"
+
+build: arch brew debian

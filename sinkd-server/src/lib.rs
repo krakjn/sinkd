@@ -175,6 +175,8 @@ async fn handle_pair(mut sock: TcpStream, state: &Path, fixed: Option<&str>, hub
         None => format!("{:06}", u32::from_be_bytes(random_bytes::<4>()?) % 1_000_000),
     };
     eprintln!("pair code {code} for client {client_id}");
+    sd_status(&format!("pair code {code}"));
+    let _clear = ClearStatus;
     write_frame(&mut sock, b"ready").await?;
     let typed = String::from_utf8(read_frame(&mut sock).await?).map_err(|e| e.to_string())?;
     if typed.trim() != code {
@@ -434,4 +436,51 @@ fn save_anchors(hub: &Hub, sync_root: &Path) -> Result<(), String> {
     };
     let text = toml::to_string_pretty(&store).map_err(|e| e.to_string())?;
     atomic_write(&anchors_file(sync_root), text.as_bytes())
+}
+
+// Clears the systemd status line when the pair attempt ends.
+struct ClearStatus;
+impl Drop for ClearStatus {
+    fn drop(&mut self) {
+        sd_status("");
+    }
+}
+
+fn sd_status(text: &str) {
+    let Ok(notify) = std::env::var("NOTIFY_SOCKET") else { return };
+    if notify.is_empty() {
+        return;
+    }
+    let msg = format!("STATUS={text}\n");
+    let Ok(sock) = std::os::unix::net::UnixDatagram::unbound() else { return };
+    let _ = send_notify(&sock, &notify, msg.as_bytes());
+}
+
+fn send_notify(sock: &std::os::unix::net::UnixDatagram, addr: &str, msg: &[u8]) -> std::io::Result<usize> {
+    // shortcut: filesystem NOTIFY_SOCKET only, upgrade if a host still uses an abstract socket
+    if addr.starts_with('@') {
+        return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "abstract socket"));
+    }
+    sock.send_to(msg, std::path::Path::new(addr))
+}
+
+#[cfg(test)]
+mod notify_test {
+    use super::sd_status;
+
+    #[test]
+    fn status_reaches_the_notify_socket() {
+        let dir = std::env::temp_dir().join(format!("sinkd-notify-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("notify.sock");
+        let recv = std::os::unix::net::UnixDatagram::bind(&path).unwrap();
+        std::env::set_var("NOTIFY_SOCKET", &path);
+        sd_status("pair code 424242");
+        std::env::remove_var("NOTIFY_SOCKET");
+        let mut buf = [0u8; 64];
+        let n = recv.recv(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"STATUS=pair code 424242\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

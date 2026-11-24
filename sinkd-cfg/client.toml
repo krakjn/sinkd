@@ -1,6 +1,9 @@
 # Optional. Flags on the command line override this file.
+# Uncomment what you need. .gitignore is honored. A later ! line puts a child back.
 # server = "192.168.1.20"
 # zenoh_port = 7447
 # pair_port = 7449
-anchors = []
-shares = []
+# [[anchors]]
+# path = "/home/you/Documents"
+# ignore = ["something/", "!something/thing/"]
+# shares = ["/home/you/Shared"]

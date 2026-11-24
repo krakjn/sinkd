@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use sinkd_client::{load_client, pair, reload_running, run, stop_running, ClientOverrides};
@@ -53,6 +54,19 @@ enum Cmd {
     },
 }
 
+fn unpaired(err: &str) -> bool {
+    err.starts_with("no server set") || err.contains("not paired yet") || err.starts_with("no anchors")
+}
+
+// true to try again, false when the operator hits Ctrl-C.
+async fn pause_for_pair(err: &str) -> bool {
+    log::info!("{err}");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => false,
+        _ = tokio::time::sleep(Duration::from_secs(30)) => true,
+    }
+}
+
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
@@ -70,24 +84,40 @@ fn main() -> ExitCode {
             sync_ssh(&anchor, &remote, Opts { delete, update_only: false }).map(|_| ())
         }
         None => {
-            let settings = load_client(
-                cli.config.as_deref(),
-                ClientOverrides {
-                    server: cli.server,
-                    anchors: cli.anchor.into_iter().map(|p| expand(&p.to_string_lossy())).collect(),
-                    shares: cli.share.into_iter().map(|p| expand(&p.to_string_lossy())).collect(),
-                    state_dir: Some(state),
-                    runtime_dir: Some(runtime),
-                    ..ClientOverrides::default()
-                },
-            );
-            match settings {
-                Ok(settings) => {
-                    let rt = tokio::runtime::Runtime::new().expect("runtime");
-                    rt.block_on(run(settings))
+            let anchors: Vec<_> = cli.anchor.iter().map(|p| expand(&p.to_string_lossy())).collect();
+            let shares: Vec<_> = cli.share.iter().map(|p| expand(&p.to_string_lossy())).collect();
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            rt.block_on(async {
+                loop {
+                    let loaded = load_client(
+                        cli.config.as_deref(),
+                        ClientOverrides {
+                            server: cli.server.clone(),
+                            anchors: anchors.clone(),
+                            shares: shares.clone(),
+                            state_dir: Some(state.clone()),
+                            runtime_dir: Some(runtime.clone()),
+                            ..ClientOverrides::default()
+                        },
+                    );
+                    match loaded {
+                        Err(e) if unpaired(&e) => {
+                            if !pause_for_pair(&e).await {
+                                return Ok(());
+                            }
+                        }
+                        Err(e) => return Err(e),
+                        Ok(settings) => match run(settings).await {
+                            Err(e) if unpaired(&e) => {
+                                if !pause_for_pair(&e).await {
+                                    return Ok(());
+                                }
+                            }
+                            other => return other,
+                        },
+                    }
                 }
-                Err(e) => Err(e),
-            }
+            })
         }
     };
     if let Err(e) = result {

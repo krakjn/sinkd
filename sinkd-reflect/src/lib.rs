@@ -94,12 +94,26 @@ pub enum Side {
     Receive,
 }
 
-extern "C" fn on_filter(_user: *mut std::ffi::c_void, path: *const std::ffi::c_char, _is_dir: i32) -> i32 {
+static EXTRA: std::sync::Mutex<Option<fn(&str, bool) -> bool>> = std::sync::Mutex::new(None);
+
+/// `skip` returns true when this job should not copy the path. One job at a time.
+pub fn set_extra_filter(skip: Option<fn(&str, bool) -> bool>) {
+    *EXTRA.lock().unwrap_or_else(|err| err.into_inner()) = skip;
+}
+
+extern "C" fn on_filter(_user: *mut std::ffi::c_void, path: *const std::ffi::c_char, is_dir: i32) -> i32 {
     if path.is_null() {
         return 1;
     }
     let text = unsafe { CStr::from_ptr(path) }.to_string_lossy();
-    i32::from(!text.contains(".sinkd-conflict-"))
+    if text.contains(".sinkd-conflict-") {
+        return 0;
+    }
+    let skip = *EXTRA.lock().unwrap_or_else(|err| err.into_inner());
+    if skip.is_some_and(|skip| skip(&text, is_dir != 0)) {
+        return 0;
+    }
+    1
 }
 
 pub struct Job {

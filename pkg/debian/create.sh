@@ -58,13 +58,31 @@ fi
 install "${BIN}" "${STAGE}/usr/bin/sinkd"
 install "${BIN_SRV}" "${STAGE}/usr/bin/sinkd-srv"
 install -m 644 LICENSE "${STAGE}/usr/share/doc/sinkd/copyright"
-install -d "${STAGE}/etc/sinkd" "${STAGE}/usr/lib/systemd/system" "${STAGE}/usr/lib/systemd/user"
+install -d "${STAGE}/etc/sinkd" "${STAGE}/usr/lib/systemd/system" \
+  "${STAGE}/usr/lib/sysusers.d" "${STAGE}/usr/lib/tmpfiles.d"
 install -m 644 "${ROOT}/sinkd-cfg/server.toml" "${STAGE}/etc/sinkd/server.toml"
 install -m 644 "${ROOT}/sinkd-cfg/client.toml" "${STAGE}/usr/share/sinkd/client.toml"
+install -m 755 "${ROOT}/pkg/install-client-config" "${STAGE}/usr/share/sinkd/install-client-config"
+install -m 644 "${ROOT}/sinkd-cfg/client.toml" "${STAGE}/etc/skel/.config/sinkd/client.toml"
 install -m 644 "${ROOT}/pkg/systemd/sinkd-srv.service" "${STAGE}/usr/lib/systemd/system/sinkd-srv.service"
-install -m 644 "${ROOT}/pkg/systemd/sinkd.service" "${STAGE}/usr/lib/systemd/user/sinkd.service"
+install -m 644 "${ROOT}/pkg/systemd/sinkd@.service" "${STAGE}/usr/lib/systemd/system/sinkd@.service"
+install -m 644 "${ROOT}/pkg/sysusers.d/sinkd.conf" "${STAGE}/usr/lib/sysusers.d/sinkd.conf"
+install -m 644 "${ROOT}/pkg/tmpfiles.d/sinkd.conf" "${STAGE}/usr/lib/tmpfiles.d/sinkd.conf"
 install -d "${STAGE}/usr/share/man/man1"
 install -m 644 "${ROOT}/pkg/man/sinkd.1" "${ROOT}/pkg/man/sinkd-srv.1" "${STAGE}/usr/share/man/man1/"
+
+cat >"${STAGE}/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -e
+if command -v systemd-sysusers >/dev/null 2>&1; then
+  systemd-sysusers sinkd.conf || true
+fi
+if command -v systemd-tmpfiles >/dev/null 2>&1; then
+  systemd-tmpfiles --create sinkd.conf || true
+fi
+/usr/share/sinkd/install-client-config
+EOF
+chmod 755 "${STAGE}/DEBIAN/postinst"
 
 cat >"${STAGE}/DEBIAN/control" <<EOF
 Package: sinkd

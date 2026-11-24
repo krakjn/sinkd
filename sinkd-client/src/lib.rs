@@ -135,6 +135,9 @@ pub async fn run(settings: ClientSettings) -> Result<(), String> {
             Some(path) = rx.recv() => {
                 if let Some(watch) = watch_for(&watches, &path) {
                     let watch = watch.clone();
+                    if ignored_event(&watch, &path) {
+                        continue;
+                    }
                     // force is false so a pull's own writes, once the manifest matches, do not push again.
                     if let Err(e) = sync_anchor(&session, &rpc, &settings, &bundle.id, &bundle.secret, &watch, false, &applying).await {
                         log::warn!("{}: {e}", watch.path.display());
@@ -157,7 +160,13 @@ pub async fn run(settings: ClientSettings) -> Result<(), String> {
                 }) {
                     let watch = watch.clone();
                     let manifest = sinkd_core::manifest::load(&manifest_path(&settings.state_dir, &key_of(&watch)));
-                    let result = if sinkd_core::dirty(&watch.path, &manifest).is_empty() {
+                    let result = if sinkd_core::dirty_with(
+                        &watch.path,
+                        &manifest,
+                        &sinkd_core::Rules::load(&watch.path, &watch.ignore),
+                    )
+                    .is_empty()
+                    {
                         pull(&session, &rpc, &settings, &bundle.id, &bundle.secret, &watch, true, false, &applying).await
                     } else {
                         sync_anchor(&session, &rpc, &settings, &bundle.id, &bundle.secret, &watch, false, &applying).await
@@ -190,9 +199,19 @@ fn prepare(watches: &[Watch]) -> Result<Vec<Watch>, String> {
     for watch in watches {
         std::fs::create_dir_all(&watch.path).map_err(|e| format!("{}: {e}", watch.path.display()))?;
         let path = watch.path.canonicalize().map_err(|e| format!("{}: {e}", watch.path.display()))?;
-        out.push(Watch { path, share: watch.share });
+        out.push(Watch { path, share: watch.share, ignore: watch.ignore.clone() });
     }
     Ok(out)
+}
+
+fn ignored_event(watch: &Watch, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(&watch.path) else { return false };
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    if rel.is_empty() {
+        return false;
+    }
+    let is_dir = path.is_dir();
+    sinkd_core::Rules::load(&watch.path, &watch.ignore).ignored(&rel, is_dir)
 }
 
 fn watch_for(watches: &[Watch], path: &Path) -> Option<Watch> {
@@ -219,17 +238,20 @@ async fn sync_anchor(
 ) -> Result<(), String> {
     let key = key_of(watch);
     let manifest_file = manifest_path(&settings.state_dir, &key);
-    let was_dirty = !sinkd_core::dirty(
+    let rules = sinkd_core::Rules::load(&watch.path, &watch.ignore);
+    let was_dirty = !sinkd_core::dirty_with(
         &watch.path,
         &sinkd_core::manifest::load(&manifest_file),
+        &rules,
     )
     .is_empty();
     if read_basis(&settings.state_dir, &key).is_none() {
         pull(session, rpc, settings, client_id, secret, watch, false, true, applying).await?;
     }
-    let still_dirty = !sinkd_core::dirty(
+    let still_dirty = !sinkd_core::dirty_with(
         &watch.path,
         &sinkd_core::manifest::load(&manifest_file),
+        &rules,
     )
     .is_empty();
     if !force && !was_dirty && !still_dirty {
@@ -250,16 +272,20 @@ async fn sync_anchor(
     };
     match rpc_call(session, rpc, &request).await? {
         Reply::Granted { data_port, token, head, client_sends, delete, update_only } => {
-            transfer(settings, data_port, token, &watch.path, client_sends, delete, update_only, applying).await?;
+            transfer(settings, data_port, token, watch, client_sends, delete, update_only, applying).await?;
             write_basis(&settings.state_dir, &key, head.saturating_add(1))?;
-            let scanned = sinkd_core::manifest::scan(&watch.path);
+            let scanned = sinkd_core::scan_with(&watch.path, &sinkd_core::Rules::load(&watch.path, &watch.ignore));
             sinkd_core::manifest::store(&manifest_path(&settings.state_dir, &key), &scanned)?;
             Ok(())
         }
         Reply::Behind { head } => {
             log::info!("{} is behind {head}; keeping local edits aside", watch.path.display());
             let manifest = sinkd_core::manifest::load(&manifest_path(&settings.state_dir, &key));
-            let dirty = sinkd_core::dirty(&watch.path, &manifest);
+            let dirty = sinkd_core::dirty_with(
+                &watch.path,
+                &manifest,
+                &sinkd_core::Rules::load(&watch.path, &watch.ignore),
+            );
             let saved = preserve(
                 &watch.path,
                 &dirty,
@@ -302,10 +328,10 @@ async fn pull(
     };
     match rpc_call(session, rpc, &request).await? {
         Reply::Granted { data_port, token, head, client_sends, delete, update_only } => {
-            transfer(settings, data_port, token, &watch.path, client_sends, delete, update_only, applying).await?;
+            transfer(settings, data_port, token, watch, client_sends, delete, update_only, applying).await?;
             let key = key_of(watch);
             write_basis(&settings.state_dir, &key, head)?;
-            let scanned = sinkd_core::manifest::scan(&watch.path);
+            let scanned = sinkd_core::scan_with(&watch.path, &sinkd_core::Rules::load(&watch.path, &watch.ignore));
             sinkd_core::manifest::store(&manifest_path(&settings.state_dir, &key), &scanned)?;
             Ok(())
         }
@@ -318,14 +344,15 @@ async fn transfer(
     settings: &ClientSettings,
     data_port: u16,
     token: [u8; 16],
-    dir: &Path,
+    watch: &Watch,
     client_sends: bool,
     delete: bool,
     update_only: bool,
     applying: &AtomicBool,
 ) -> Result<(), String> {
     let host = settings.server.clone();
-    let dir = dir.to_path_buf();
+    let dir = watch.path.clone();
+    let rules = sinkd_core::Rules::load(&watch.path, &watch.ignore);
     applying.store(true, Ordering::Relaxed);
     let result = tokio::task::spawn_blocking(move || {
         let sock = std::net::TcpStream::connect((host.as_str(), data_port)).map_err(|e| e.to_string())?;
@@ -334,12 +361,43 @@ async fn transfer(
         let _ = sock.set_write_timeout(Some(Duration::from_secs(120)));
         std::io::Write::write_all(&mut &sock, &token).map_err(|e| e.to_string())?;
         let side = if client_sends { Side::Send } else { Side::Receive };
+        let _guard = JobIgnore::arm(dir.clone(), rules);
         sync_socket(&sock, side, &dir, Opts { delete, update_only }).map(|_| ())
     })
     .await
     .map_err(|e| e.to_string())?;
     applying.store(false, Ordering::Relaxed);
     result
+}
+
+struct JobIgnore;
+impl JobIgnore {
+    fn arm(root: PathBuf, rules: sinkd_core::Rules) -> Self {
+        *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Active { root, rules });
+        sinkd_reflect::set_extra_filter(Some(extra_skip));
+        Self
+    }
+}
+impl Drop for JobIgnore {
+    fn drop(&mut self) {
+        *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        sinkd_reflect::set_extra_filter(None);
+    }
+}
+
+struct Active {
+    root: PathBuf,
+    rules: sinkd_core::Rules,
+}
+
+static ACTIVE: std::sync::Mutex<Option<Active>> = std::sync::Mutex::new(None);
+
+fn extra_skip(path: &str, is_dir: bool) -> bool {
+    let guard = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(active) = guard.as_ref() else { return false };
+    let rel = path.strip_prefix(&*active.root.to_string_lossy()).unwrap_or(path);
+    let rel = rel.trim_start_matches(['/', '\\']).replace('\\', "/");
+    active.rules.ignored(&rel, is_dir)
 }
 
 async fn rpc_call(session: &zenoh::Session, key: &str, request: &Request) -> Result<Reply, String> {

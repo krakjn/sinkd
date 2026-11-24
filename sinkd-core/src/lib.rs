@@ -2,6 +2,7 @@
 
 mod auth;
 mod control;
+pub mod ignore;
 pub mod manifest;
 mod paths;
 mod session;
@@ -11,11 +12,12 @@ pub use auth::{
     save_client_bundle, save_peer, secrets_eq, ClientBundle, ServerIdentity,
 };
 pub use control::{notify, serve, socket_path};
-pub use manifest::{conflict_name, dirty, preserve, scan, Manifest};
+pub use manifest::{conflict_name, dirty, dirty_with, preserve, scan, scan_with, Manifest};
 pub use paths::{
     anchor_id, anchor_key, config_dir, expand, hostname, random_bytes, runtime_dir, sanitize,
     state_dir, user_name,
 };
+pub use ignore::Rules;
 pub use session::{open_session, Role};
 
 use std::path::PathBuf;
@@ -26,6 +28,7 @@ use serde::Deserialize;
 pub struct Watch {
     pub path: PathBuf,
     pub share: bool,
+    pub ignore: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,12 +62,19 @@ struct ServerFile {
     pair_port: Option<u16>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AnchorSpec {
+    Path(String),
+    Table { path: String, #[serde(default)] ignore: Vec<String> },
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct ClientFile {
     server: Option<String>,
     zenoh_port: Option<u16>,
     pair_port: Option<u16>,
-    anchors: Option<Vec<String>>,
+    anchors: Option<Vec<AnchorSpec>>,
     shares: Option<Vec<String>>,
 }
 
@@ -131,18 +141,22 @@ pub fn load_client(config: Option<&std::path::Path>, over: ClientOverrides) -> R
         })?;
     let mut watches = Vec::new();
     if over.anchors.is_empty() && over.shares.is_empty() {
-        for path in file.anchors.unwrap_or_default() {
-            watches.push(Watch { path: expand(&path), share: false });
+        for spec in file.anchors.unwrap_or_default() {
+            let (path, ignore) = match spec {
+                AnchorSpec::Path(path) => (path, Vec::new()),
+                AnchorSpec::Table { path, ignore } => (path, ignore),
+            };
+            watches.push(Watch { path: expand(&path), share: false, ignore });
         }
         for path in file.shares.unwrap_or_default() {
-            watches.push(Watch { path: expand(&path), share: true });
+            watches.push(Watch { path: expand(&path), share: true, ignore: Vec::new() });
         }
     } else {
         for path in over.anchors {
-            watches.push(Watch { path, share: false });
+            watches.push(Watch { path, share: false, ignore: Vec::new() });
         }
         for path in over.shares {
-            watches.push(Watch { path, share: true });
+            watches.push(Watch { path, share: true, ignore: Vec::new() });
         }
     }
     if watches.is_empty() {
@@ -188,4 +202,26 @@ pub fn write_basis(state: &std::path::Path, anchor_key: &str, generation: u64) -
 
 pub fn manifest_path(state: &std::path::Path, anchor_key: &str) -> PathBuf {
     state.join("manifest").join(anchor_key)
+}
+
+#[cfg(test)]
+mod anchor_parse {
+    use super::load_client;
+
+    #[test]
+    fn table_keeps_ignore_and_a_string_list_still_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("client.toml");
+        std::fs::write(
+            &cfg,
+            "server = \"hub\"\n[[anchors]]\npath = \"/data\"\nignore = [\"skip/\"]\n",
+        )
+        .unwrap();
+        let settings = load_client(Some(&cfg), Default::default()).unwrap();
+        assert_eq!(settings.watches[0].ignore, ["skip/"]);
+
+        std::fs::write(&cfg, "server = \"hub\"\nanchors = [\"/data\"]\n").unwrap();
+        let settings = load_client(Some(&cfg), Default::default()).unwrap();
+        assert!(settings.watches[0].ignore.is_empty());
+    }
 }

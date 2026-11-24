@@ -1,3 +1,5 @@
+mod pkg
+
 _:
     @just --list
 
