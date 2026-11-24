@@ -119,9 +119,34 @@ jobs:
   #         git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore: bump version"
   #         git push
 
-  publish:
-    if: github.ref == 'refs/heads/main'
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --generate-notes -- *
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build, release
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -167,28 +192,3 @@ jobs:
 
       - id: deployment
         uses: actions/deploy-pages@v5
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: actions/download-artifact@v8
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: checksums and release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd dist
-          sha256sum -- * > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --generate-notes -- *
