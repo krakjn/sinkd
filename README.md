@@ -46,9 +46,9 @@ That is the release build. The site is [sinkd.octoworks.dev](https://sinkd.octow
 
 **Linux:** `pkg/debian/create.sh` and `pkg/arch/create.sh` package the static musl build. Nothing else is required at runtime. `just test-docker` runs the sync scenarios in Alpine.
 
-**macOS:** `brew install --head ./pkg/homebrew/sinkd.rb` after `libreflect.a` is installed.
+**macOS:** `brew install --head ./pkg/brew/sinkd.rb` after `libreflect.a` is installed.
 
-systemd user unit: `pkg/systemd/sinkd.service`. systemd system unit: `pkg/systemd/sinkd-srv.service`. launchd plists are in `pkg/launchd/`.
+systemd hub unit: `pkg/systemd/sinkd-srv.service`. systemd client template: `pkg/systemd/sinkd@.service` (`systemctl enable sinkd@tony`). Neither is enabled by the package. launchd plists are in `pkg/launchd/`.
 
 ### Workspace
 

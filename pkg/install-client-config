@@ -1,0 +1,14 @@
+#!/bin/sh
+# Copy the commented client template into each home that does not have one.
+set -eu
+src=/usr/share/sinkd/client.toml
+[ -f "$src" ] || exit 0
+for home in /home/*; do
+  [ -d "$home" ] || continue
+  dest="$home/.config/sinkd/client.toml"
+  [ -e "$dest" ] && continue
+  owner=$(stat -c %U "$home")
+  group=$(stat -c %G "$home")
+  install -d -o "$owner" -g "$group" -m 0755 "$home/.config/sinkd"
+  install -o "$owner" -g "$group" -m 0644 "$src" "$dest"
+done

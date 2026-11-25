@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sinkd_core::{
     anchor_key, atomic_write, ensure_server_identity, issue_client, load_peers, open_session,
-    random_bytes, secrets_eq, serve, socket_path, Role, ServerSettings,
+    random_bytes, secrets_eq, serve, socket_path, Role, Rules, ServerSettings,
 };
 use sinkd_proto::{decode, encode, event_key, rpc_key, up_key, Body, HeadEvent, Reply, Request, VERSION};
 use sinkd_reflect::{sync_socket, Opts, Side};
@@ -45,6 +45,7 @@ struct Permit {
     update_only: bool,
     anchor_key: String,
     client_id: String,
+    ignore: Vec<String>,
     guard: OwnedMutexGuard<()>,
 }
 
@@ -175,6 +176,8 @@ async fn handle_pair(mut sock: TcpStream, state: &Path, fixed: Option<&str>, hub
         None => format!("{:06}", u32::from_be_bytes(random_bytes::<4>()?) % 1_000_000),
     };
     eprintln!("pair code {code} for client {client_id}");
+    sd_status(&format!("pair code {code}"));
+    let _clear = ClearStatus;
     write_frame(&mut sock, b"ready").await?;
     let typed = String::from_utf8(read_frame(&mut sock).await?).map_err(|e| e.to_string())?;
     if typed.trim() != code {
@@ -231,12 +234,51 @@ async fn answer(hub: &SharedHub, data_port: u16, payload: Option<&zenoh::bytes::
         return Reply::Failed { message: "protocol version mismatch".into() };
     }
     match &request.body {
-        Body::Push { anchor_id, path, user, share, basis } => {
-            grant(hub, data_port, &request, anchor_id, path, user, *share, Some(*basis), true, true, false).await
-        }
-        Body::Pull { anchor_id, path, user, share, delete, update_only } => {
-            grant(hub, data_port, &request, anchor_id, path, user, *share, None, false, *delete, *update_only).await
-        }
+        Body::Push {
+            anchor_id,
+            path,
+            user,
+            share,
+            basis,
+            ignore,
+        } => grant(
+            hub,
+            data_port,
+            &request,
+            anchor_id,
+            path,
+            user,
+            *share,
+            ignore.clone(),
+            Some(*basis),
+            true,
+            true,
+            false,
+        )
+        .await,
+        Body::Pull {
+            anchor_id,
+            path,
+            user,
+            share,
+            delete,
+            update_only,
+            ignore,
+        } => grant(
+            hub,
+            data_port,
+            &request,
+            anchor_id,
+            path,
+            user,
+            *share,
+            ignore.clone(),
+            None,
+            false,
+            *delete,
+            *update_only,
+        )
+        .await,
     }
 }
 
@@ -249,6 +291,7 @@ async fn grant(
     path: &str,
     user: &str,
     share: bool,
+    ignore: Vec<String>,
     basis: Option<u64>,
     client_sends: bool,
     delete: bool,
@@ -301,6 +344,7 @@ async fn grant(
             update_only,
             anchor_key: key,
             client_id: request.client_id.clone(),
+            ignore,
             guard,
         },
     );
@@ -360,13 +404,28 @@ async fn handle_data(sock: TcpStream, hub: &SharedHub, session: &zenoh::Session,
         .permits
         .remove(&token)
         .ok_or_else(|| "unknown or expired token".to_string())?;
-    let Permit { dir, client_sends, delete, update_only, anchor_key, client_id, guard } = permit;
+    let Permit {
+        dir,
+        client_sends,
+        delete,
+        update_only,
+        anchor_key,
+        client_id,
+        ignore,
+        guard,
+    } = permit;
     let side = if client_sends { Side::Receive } else { Side::Send };
     let opts = Opts { delete, update_only };
-    let stats = tokio::task::spawn_blocking(move || sync_socket(&std_sock, side, &dir, opts))
+    let rules = Rules::load(&dir, &ignore);
+    let stats = tokio::task::spawn_blocking(move || sync_socket(&std_sock, side, &dir, opts, rules))
         .await
         .map_err(|e| e.to_string())??;
-    log::info!("{anchor_key}: files={} bytes={}", stats.files, stats.bytes);
+    log::info!(
+        "{anchor_key}: files={} bytes={} deleted={}",
+        stats.files,
+        stats.bytes,
+        stats.deleted
+    );
     if client_sends {
         let (head, sync_root) = {
             let mut locked = hub.lock().await;
@@ -434,4 +493,51 @@ fn save_anchors(hub: &Hub, sync_root: &Path) -> Result<(), String> {
     };
     let text = toml::to_string_pretty(&store).map_err(|e| e.to_string())?;
     atomic_write(&anchors_file(sync_root), text.as_bytes())
+}
+
+// Clears the systemd status line when the pair attempt ends.
+struct ClearStatus;
+impl Drop for ClearStatus {
+    fn drop(&mut self) {
+        sd_status("");
+    }
+}
+
+fn sd_status(text: &str) {
+    let Ok(notify) = std::env::var("NOTIFY_SOCKET") else { return };
+    if notify.is_empty() {
+        return;
+    }
+    let msg = format!("STATUS={text}\n");
+    let Ok(sock) = std::os::unix::net::UnixDatagram::unbound() else { return };
+    let _ = send_notify(&sock, &notify, msg.as_bytes());
+}
+
+fn send_notify(sock: &std::os::unix::net::UnixDatagram, addr: &str, msg: &[u8]) -> std::io::Result<usize> {
+    // shortcut: filesystem NOTIFY_SOCKET only, upgrade if a host still uses an abstract socket
+    if addr.starts_with('@') {
+        return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "abstract socket"));
+    }
+    sock.send_to(msg, std::path::Path::new(addr))
+}
+
+#[cfg(test)]
+mod notify_test {
+    use super::sd_status;
+
+    #[test]
+    fn status_reaches_the_notify_socket() {
+        let dir = std::env::temp_dir().join(format!("sinkd-notify-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("notify.sock");
+        let recv = std::os::unix::net::UnixDatagram::bind(&path).unwrap();
+        std::env::set_var("NOTIFY_SOCKET", &path);
+        sd_status("pair code 424242");
+        std::env::remove_var("NOTIFY_SOCKET");
+        let mut buf = [0u8; 64];
+        let n = recv.recv(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"STATUS=pair code 424242\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

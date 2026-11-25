@@ -4,7 +4,7 @@
 # homepage is https://sinkd.octoworks.dev: that DNS name is this repo's GitHub Pages site.
 # head stays the git URL, because that is what brew clones.
 #
-#   brew install --head ./pkg/homebrew/sinkd.rb
+#   brew install --head ./pkg/brew/sinkd.rb
 
 class Sinkd < Formula
   desc "Hub-and-spoke file sync (Zenoh control, libreflect data)"

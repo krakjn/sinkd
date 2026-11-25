@@ -1,0 +1,8 @@
+target/
+_site/
+site/
+pkg/artifacts/
+scenario/docker/bin/
+tar/artifacts/
+**/.DS_Store
+.git/

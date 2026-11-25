@@ -1,0 +1,25 @@
+# Builds the static musl bins inside Linux, for hosts without a musl toolchain (macOS).
+# Context is the repo root. libreflect comes from the release tarballs in tar/.
+#   docker build -f scenario/docker/Dockerfile.build --output scenario/docker/bin .
+FROM rust:1.100-bookworm AS build
+ARG REFLECT_VERSION=0.2.5
+RUN apt-get update -qq \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        musl-tools clang libclang-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+COPY tar/ /tmp/tar/
+RUN arch=$(uname -m | sed 's/aarch64/arm64/') \
+    && tar -xzf "/tmp/tar/libreflect-${REFLECT_VERSION}-linux-${arch}.tar.gz" -C / \
+    && tar -xzf "/tmp/tar/reflect-${REFLECT_VERSION}-linux-${arch}.tar.gz" -C / \
+    && rustup target add "$(uname -m)-unknown-linux-musl"
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    triple="$(uname -m)-unknown-linux-musl" \
+    && cargo build -p sinkd -p sinkd-srv --release --locked --target "$triple" \
+    && mkdir /out \
+    && cp "target/$triple/release/sinkd" "target/$triple/release/sinkd-srv" /usr/bin/reflect /out/
+
+FROM scratch
+COPY --from=build /out/ /

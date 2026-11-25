@@ -1,3 +1,5 @@
+mod pkg
+
 _:
     @just --list
 
@@ -51,8 +53,18 @@ musl:
 build: musl
     docker build -t sinkd-scenario scenario/docker
 
-# Alpine containers: pair, push, fan-out, delete, conflict, late joiner, restart, share.
+# Alpine containers: pair, push, fan-out, delete, conflict, late joiner, restart, share, ignore, ssh.
 test: build
+    bash scenario/docker/run.sh
+
+# Static musl binaries built inside a Linux container, from the libreflect tarballs in tar/.
+musl-docker:
+    rm -rf scenario/docker/bin
+    DOCKER_BUILDKIT=1 docker build -f scenario/docker/Dockerfile.build --output scenario/docker/bin .
+
+# Same as test, for hosts without a musl toolchain (macOS).
+test-local-docker: musl-docker
+    docker build -t sinkd-scenario scenario/docker
     bash scenario/docker/run.sh
 
 # Assemble the pages site and open it. Ctrl-C stops the server.

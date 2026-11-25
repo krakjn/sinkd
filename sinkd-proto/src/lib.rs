@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
@@ -20,6 +20,8 @@ pub enum Body {
         user: String,
         share: bool,
         basis: u64,
+        #[serde(default)]
+        ignore: Vec<String>,
     },
     Pull {
         anchor_id: String,
@@ -28,6 +30,8 @@ pub enum Body {
         share: bool,
         delete: bool,
         update_only: bool,
+        #[serde(default)]
+        ignore: Vec<String>,
     },
 }
 
@@ -100,6 +104,7 @@ mod tests {
                 user: "tony".to_string(),
                 share: false,
                 basis: 3,
+                ignore: vec!["skip/".to_string()],
             },
         };
         let bytes = encode(&req).expect("encode");

@@ -25,7 +25,7 @@ Building from source does. On Linux, install the libreflect package so `pkg-conf
 cargo build --release
 ```
 
-The binaries are `target/x86_64-unknown-linux-musl/release/sinkd` and `sinkd-srv` on Linux. On Arch, install the `rust-musl` package first. macOS is not a musl build: `brew install --head ./pkg/homebrew/sinkd.rb` after libreflect is installed. Windows is WSL only.
+The binaries are `target/x86_64-unknown-linux-musl/release/sinkd` and `sinkd-srv` on Linux. On Arch, install the `rust-musl` package first. macOS is not a musl build: `brew install --head ./pkg/brew/sinkd.rb` after libreflect is installed. Windows is WSL only.
 
 ## First run, two machines
 
@@ -89,9 +89,13 @@ Client, `~/.config/sinkd/client.toml`:
 
 ```toml
 server = "192.168.1.20"
-anchors = ["~/Documents"]
+[[anchors]]
+path = "~/Documents"
+ignore = ["something/", "!something/thing/"]
 shares = ["~/Shared"]
 ```
+
+`.gitignore` in the folder applies first. The `ignore` list is after it, and a line that starts with `!` puts that path back.
 
 `--config /path/to/file.toml` uses a different file. After a successful `pair`, the client remembers the hub, so later runs can omit `--server` if it was saved.
 
@@ -99,9 +103,9 @@ State (keys, the remembered hub, what has already synced) lives in `~/.local/sta
 
 ## Leave it running
 
-The systemd units in `pkg/systemd/` are thin wrappers. The client unit is a user service (`sinkd`). The hub unit is a system service (`sinkd-srv`) running as user `sinkd`, with the store at `/srv/sinkd` and the config at `/etc/sinkd/server.toml`. macOS plists are in `pkg/launchd/`.
+The systemd units in `pkg/systemd/` are not enabled by the package. `systemctl enable --now sinkd-srv` makes this machine the hub. It runs as user `sinkd`, with the store at `/srv/sinkd` and the config at `/etc/sinkd/server.toml`. `systemctl enable --now sinkd@tony` watches tony's folders from `~tony/.config/sinkd/client.toml`, and the pair is kept in `~tony/.local/state/sinkd`. macOS plists are in `pkg/launchd/`.
 
-The hub prints the 6-digit pair code when a client connects, on stderr. Under systemd that goes to the journal, not the terminal. Start `sinkd pair` on the other machine, then on the hub:
+The hub prints the 6-digit pair code when a client connects, on stderr. Under systemd that line is also the service status. Start `sinkd pair` on the other machine, then on the hub:
 
 ```bash
 journalctl -u sinkd-srv -f

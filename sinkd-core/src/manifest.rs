@@ -17,12 +17,16 @@ pub struct FileMeta {
 }
 
 pub fn scan(root: &Path) -> Manifest {
+    scan_with(root, &crate::Rules::default())
+}
+
+pub fn scan_with(root: &Path, rules: &crate::Rules) -> Manifest {
     let mut files = BTreeMap::new();
-    walk(root, root, &mut files);
+    walk(root, root, rules, &mut files);
     Manifest { files }
 }
 
-fn walk(root: &Path, dir: &Path, files: &mut BTreeMap<String, FileMeta>) {
+fn walk(root: &Path, dir: &Path, rules: &crate::Rules, files: &mut BTreeMap<String, FileMeta>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -32,22 +36,29 @@ fn walk(root: &Path, dir: &Path, files: &mut BTreeMap<String, FileMeta>) {
             continue;
         }
         let Ok(kind) = entry.file_type() else { continue };
+        let Ok(rel) = path.strip_prefix(root) else { continue };
+        let rel = rel.to_string_lossy().replace('\\', "/");
         if kind.is_dir() {
-            walk(root, &path, files);
+            if rules.ignored(&rel, true) && !rules.descend(&rel) {
+                continue;
+            }
+            walk(root, &path, rules, files);
             continue;
         }
         if !kind.is_file() && !kind.is_symlink() {
             continue;
         }
+        if rules.ignored(&rel, false) {
+            continue;
+        }
         let Ok(meta) = entry.metadata() else { continue };
-        let Ok(rel) = path.strip_prefix(root) else { continue };
         let mtime = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
         files.insert(
-            rel.to_string_lossy().replace('\\', "/"),
+            rel,
             FileMeta { size: meta.len(), mtime },
         );
     }
@@ -55,7 +66,11 @@ fn walk(root: &Path, dir: &Path, files: &mut BTreeMap<String, FileMeta>) {
 
 #[must_use]
 pub fn dirty(root: &Path, manifest: &Manifest) -> Vec<String> {
-    let now = scan(root);
+    dirty_with(root, manifest, &crate::Rules::default())
+}
+
+pub fn dirty_with(root: &Path, manifest: &Manifest, rules: &crate::Rules) -> Vec<String> {
+    let now = scan_with(root, rules);
     let mut out = Vec::new();
     for (path, meta) in &now.files {
         if manifest.files.get(path) != Some(meta) {
