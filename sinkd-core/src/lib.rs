@@ -286,7 +286,7 @@ mod anchor_parse {
             "server = \"hub\"\n[[anchors]]\npath = \"/data\"\nexcludes = [\"old/\"]\n",
         )
         .unwrap();
-        let settings = load_client(Some(&cfg), Default::default()).unwrap();
+        let settings = load_client(Some(&cfg), super::ClientOverrides::default()).unwrap();
         assert_eq!(settings.watches[0].ignore, ["old/"]);
     }
 
@@ -299,11 +299,11 @@ mod anchor_parse {
             "server = \"hub\"\n[[anchors]]\npath = \"/data\"\nignore = [\"skip/\"]\n",
         )
         .unwrap();
-        let settings = load_client(Some(&cfg), Default::default()).unwrap();
+        let settings = load_client(Some(&cfg), super::ClientOverrides::default()).unwrap();
         assert_eq!(settings.watches[0].ignore, ["skip/"]);
 
         std::fs::write(&cfg, "server = \"hub\"\nanchors = [\"/data\"]\n").unwrap();
-        let settings = load_client(Some(&cfg), Default::default()).unwrap();
-        assert!(settings.watches[0].ignore.is_empty());
+        let settings = load_client(Some(&cfg), super::ClientOverrides::default()).unwrap();
+        assert_eq!(settings.watches[0].ignore, Vec::<String>::new());
     }
 }

@@ -93,6 +93,11 @@ fn bindgen_header(header: &std::path::Path, includes: &[PathBuf]) {
             .any(|line| line.trim() == "#define REFLECT_API_VERSION 4"),
         "reflect.h ABI is not 4; sinkd was written against REFLECT_API_VERSION 4",
     );
+    // fd delete and job-local filters arrived with deleted_files, without an ABI bump.
+    assert!(
+        header_text.contains("deleted_files"),
+        "reflect.h predates libreflect 0.2.5; sinkd needs fd delete and job-local filters",
+    );
     let mut builder = bindgen::Builder::default()
         .header(header.to_string_lossy())
         .allowlist_function("reflect_.*")

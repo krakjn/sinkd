@@ -1,15 +1,14 @@
 //! Safe `libreflect` jobs.
 //!
-//! shortcut: the filter hook inside libreflect is process-global, so every job
-//! takes a process-wide lock. Drop the lock if a future libreflect makes the
-//! hook job-local.
+//! Each job owns its ignore `Rules` and hands them to libreflect as the filter's
+//! `user` pointer. Filters are job-local, so jobs run concurrently without a lock.
+//! On SEND the filter skips transfer; on RECEIVE it protects local ignored paths
+//! from `delete`.
 
-use std::collections::HashSet;
-use std::ffi::{CStr, CString};
-use std::io::{Read, Write};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::path::Path;
+use std::sync::OnceLock;
 
 use sinkd_core::Rules;
 use sinkd_reflect_sys as sys;
@@ -17,15 +16,15 @@ use sinkd_reflect_sys as sys;
 const OK: i32 = sys::reflect_code_REFLECT_OK.cast_signed();
 const IDLE: i32 = sys::reflect_code_REFLECT_JOB_IDLE.cast_signed();
 const RUNNING: i32 = sys::reflect_code_REFLECT_JOB_RUNNING.cast_signed();
+const DEL_LIMIT: i32 = sys::reflect_code_REFLECT_ERR_DEL_LIMIT.cast_signed();
 
-static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+// The filter runs on several libreflect threads at once.
+const _: () = {
+    const fn sync<T: Send + Sync>() {}
+    sync::<Rules>();
+};
+
 static INIT: OnceLock<Result<(), String>> = OnceLock::new();
-
-fn lock() -> MutexGuard<'static, ()> {
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
 
 fn ensure_init() -> Result<(), String> {
     INIT.get_or_init(|| {
@@ -61,6 +60,9 @@ fn explain(result: &sys::reflect_result, allowed: &[i32]) -> Result<(), String> 
     if allowed.contains(&code) {
         return Ok(());
     }
+    if code == DEL_LIMIT {
+        return Err(format!("reflect: delete limit reached: {}", message_of(result)));
+    }
     Err(format!("reflect {code}: {}", message_of(result)))
 }
 
@@ -68,16 +70,18 @@ fn explain(result: &sys::reflect_result, allowed: &[i32]) -> Result<(), String> 
 pub struct Stats {
     pub files: i32,
     pub bytes: i64,
+    pub deleted: i32,
 }
 
 fn stats_of(result: &sys::reflect_result) -> Stats {
     if result.stats.is_null() {
-        return Stats { files: 0, bytes: 0 };
+        return Stats { files: 0, bytes: 0, deleted: 0 };
     }
     let stats = unsafe { &*result.stats };
     Stats {
         files: stats.xferred_files,
         bytes: stats.total_transferred_size,
+        deleted: stats.deleted_files,
     }
 }
 
@@ -95,71 +99,83 @@ pub enum Side {
     Receive,
 }
 
-static EXTRA: std::sync::Mutex<Option<fn(&str, bool) -> bool>> = std::sync::Mutex::new(None);
-
-/// `skip` returns true when this job should not copy the path. One job at a time.
-pub fn set_extra_filter(skip: Option<fn(&str, bool) -> bool>) {
-    *EXTRA.lock().unwrap_or_else(|err| err.into_inner()) = skip;
-}
-
-extern "C" fn on_filter(_user: *mut std::ffi::c_void, path: *const std::ffi::c_char, is_dir: i32) -> i32 {
+extern "C" fn on_filter(user: *mut c_void, path: *const c_char, is_dir: i32) -> i32 {
     if path.is_null() {
         return 1;
     }
     let text = unsafe { CStr::from_ptr(path) }.to_string_lossy();
-    if text.contains(".sinkd-conflict-") {
+    let rel = text.trim_start_matches('/');
+    if rel.contains(".sinkd-conflict-") {
         return 0;
     }
-    let skip = *EXTRA.lock().unwrap_or_else(|err| err.into_inner());
-    if skip.is_some_and(|skip| skip(&text, is_dir != 0)) {
-        return 0;
+    if user.is_null() {
+        return 1;
     }
-    1
+    let rules = unsafe { &*(user as *const Rules) };
+    // libreflect never descends an excluded directory, so one a later `!` reaches into must stay.
+    let keep = if is_dir != 0 { rules.descend(rel) } else { !rules.ignored(rel, false) };
+    i32::from(keep)
 }
 
 pub struct Job {
     raw: sys::reflect_job,
-    // Held so the C strings outlive reflect_job_cleanup.
+    // Held so the C strings and the filter's rules outlive reflect_job_cleanup.
     #[allow(dead_code)]
     kept: Vec<CString>,
+    rules: Box<Rules>,
     ready: bool,
 }
 
 impl Job {
-    fn blank() -> Self {
+    fn blank(rules: Rules) -> Self {
         Self {
             raw: sys::reflect_job { words: [0; 8] },
             kept: Vec::new(),
+            rules: Box::new(rules),
             ready: false,
         }
     }
 
-    fn opts(options: Opts) -> sys::reflect_opts {
+    fn opts(options: Opts, gitignore: bool) -> sys::reflect_opts {
         let mut opts = unsafe { sys::reflect_default_opts() };
         opts.run.delete_mode = i32::from(options.delete);
         opts.run.update_only = i32::from(options.update_only);
         opts.tree.recurse = sys::reflect_recurse_REFLECT_RECURSE_ON;
-        opts.filters.honor_gitignore = 0;
+        opts.filters.honor_gitignore = i32::from(gitignore);
         opts
     }
 
     fn arm_callbacks(&mut self) -> Result<(), String> {
+        let user = std::ptr::from_ref::<Rules>(&self.rules).cast_mut().cast::<c_void>();
         explain(
-            &unsafe {
-                sys::reflect_job_set_filter(&raw mut self.raw, Some(on_filter), std::ptr::null_mut())
-            },
+            &unsafe { sys::reflect_job_set_filter(&raw mut self.raw, Some(on_filter), user) },
             &[OK, IDLE, RUNNING],
         )
     }
 
     /// `sources` are local trees. A directory gets a trailing slash so its contents land in `dest`.
-    pub fn open_paths(options: Opts, sources: &[impl AsRef<Path>], dest: &Path) -> Result<Self, String> {
+    pub fn open_paths(
+        options: Opts,
+        sources: &[impl AsRef<Path>],
+        dest: &Path,
+        rules: Rules,
+    ) -> Result<Self, String> {
+        Self::open_paths_with(options, sources, dest, rules, false)
+    }
+
+    fn open_paths_with(
+        options: Opts,
+        sources: &[impl AsRef<Path>],
+        dest: &Path,
+        rules: Rules,
+        gitignore: bool,
+    ) -> Result<Self, String> {
         ensure_init()?;
-        let mut job = Self::blank();
+        let mut job = Self::blank(rules);
         let src = c_sources(sources)?;
-        let dst = CString::new(dest_string(dest)).map_err(|e| e.to_string())?;
-        let ptrs: Vec<*const std::ffi::c_char> = src.iter().map(|s| s.as_ptr()).collect();
-        let opts = Self::opts(options);
+        let dst = CString::new(dest.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+        let ptrs: Vec<*const c_char> = src.iter().map(|s| s.as_ptr()).collect();
+        let opts = Self::opts(options, gitignore);
         let result = unsafe {
             sys::reflect_job_init(
                 &raw mut job.raw,
@@ -183,14 +199,15 @@ impl Job {
         dir: &Path,
         in_fd: i32,
         out_fd: i32,
+        rules: Rules,
     ) -> Result<Self, String> {
         ensure_init()?;
-        let mut job = Self::blank();
-        let opts = Self::opts(options);
+        let mut job = Self::blank(rules);
+        let opts = Self::opts(options, false);
         let result = match side {
             Side::Send => {
                 let src = c_sources(std::slice::from_ref(&dir))?;
-                let ptrs: Vec<*const std::ffi::c_char> = src.iter().map(|s| s.as_ptr()).collect();
+                let ptrs: Vec<*const c_char> = src.iter().map(|s| s.as_ptr()).collect();
                 let result = unsafe {
                     sys::reflect_job_init_fd(
                         &raw mut job.raw,
@@ -231,12 +248,10 @@ impl Job {
     }
 
     pub fn run(&mut self) -> Result<Stats, String> {
-        let _guard = lock();
         let result = unsafe { sys::reflect_job_run(&raw mut self.raw) };
         explain(&result, &[OK])?;
         Ok(stats_of(&result))
     }
-
 }
 
 impl Drop for Job {
@@ -245,10 +260,6 @@ impl Drop for Job {
             unsafe { sys::reflect_job_cleanup(&raw mut self.raw) };
         }
     }
-}
-
-fn dest_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
 }
 
 fn c_sources(sources: &[impl AsRef<Path>]) -> Result<Vec<CString>, String> {
@@ -265,9 +276,13 @@ fn c_sources(sources: &[impl AsRef<Path>]) -> Result<Vec<CString>, String> {
         .collect()
 }
 
-pub fn sync_paths(options: Opts, sources: &[impl AsRef<Path>], dest: &Path) -> Result<Stats, String> {
-    let mut job = Job::open_paths(options, sources, dest)?;
-    job.run()
+pub fn sync_paths(
+    options: Opts,
+    sources: &[impl AsRef<Path>],
+    dest: &Path,
+    rules: Rules,
+) -> Result<Stats, String> {
+    Job::open_paths(options, sources, dest, rules)?.run()
 }
 
 pub fn sync_socket(
@@ -275,263 +290,166 @@ pub fn sync_socket(
     side: Side,
     dir: &Path,
     options: Opts,
+    rules: Rules,
 ) -> Result<Stats, String> {
-    // libreflect's fd receiver never removes dest files the sender dropped.
-    let keep = if options.delete {
-        exchange_keep(socket, side, dir)?
-    } else {
-        None
-    };
     let in_fd = socket.as_raw_fd();
     let out_fd = unsafe { libc::dup(in_fd) };
     if out_fd < 0 {
         return Err(format!("dup failed: {}", std::io::Error::last_os_error()));
     }
-    let result = (|| {
-        let mut job = Job::open_fd(options, side, dir, in_fd, out_fd)?;
-        job.run()
-    })();
+    let result = Job::open_fd(options, side, dir, in_fd, out_fd, rules).and_then(|mut job| job.run());
     unsafe { libc::close(out_fd) };
-    let stats = result?;
-    if let Some(keep) = keep {
-        prune(dir, &keep)?;
-    }
-    Ok(stats)
-}
-
-const MAX_KEEP: u32 = 1_000_000;
-const MAX_PATH: u32 = 4096;
-
-fn exchange_keep(socket: &std::net::TcpStream, side: Side, dir: &Path) -> Result<Option<Vec<String>>, String> {
-    match side {
-        Side::Send => {
-            write_keep(socket, &list_files(dir)?)?;
-            Ok(None)
-        }
-        Side::Receive => Ok(Some(read_keep(socket)?)),
-    }
-}
-
-fn list_files(root: &Path) -> Result<Vec<String>, String> {
-    let rules = ignore_rules();
-    let mut out = Vec::new();
-    walk_files(root, root, rules.as_ref(), &mut out)?;
-    out.sort();
-    Ok(out)
-}
-
-fn walk_files(root: &Path, dir: &Path, rules: Option<&Rules>, out: &mut Vec<String>) -> Result<(), String> {
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name();
-        if name.to_string_lossy().contains(".sinkd-conflict-") {
-            continue;
-        }
-        let path = entry.path();
-        let kind = entry.file_type().map_err(|e| e.to_string())?;
-        let Ok(rel) = path.strip_prefix(root) else { continue };
-        let rel = rel.to_string_lossy().replace('\\', "/");
-        if kind.is_dir() {
-            if rules.is_some_and(|rules| rules.ignored(&rel, true) && !rules.descend(&rel)) {
-                continue;
-            }
-            walk_files(root, &path, rules, out)?;
-            continue;
-        }
-        if !kind.is_file() && !kind.is_symlink() {
-            continue;
-        }
-        if rules.is_some_and(|rules| rules.ignored(&rel, false)) {
-            continue;
-        }
-        out.push(rel);
-    }
-    Ok(())
-}
-
-fn write_keep(mut w: impl Write, keep: &[String]) -> Result<(), String> {
-    let count = u32::try_from(keep.len()).map_err(|_| "keep list too large".to_string())?;
-    if count > MAX_KEEP {
-        return Err("keep list too large".into());
-    }
-    w.write_all(&count.to_be_bytes()).map_err(|e| e.to_string())?;
-    for path in keep {
-        let len = u32::try_from(path.len()).map_err(|_| "path too long".to_string())?;
-        if len > MAX_PATH {
-            return Err(format!("path too long: {path}"));
-        }
-        w.write_all(&len.to_be_bytes()).map_err(|e| e.to_string())?;
-        w.write_all(path.as_bytes()).map_err(|e| e.to_string())?;
-    }
-    w.flush().map_err(|e| e.to_string())
-}
-
-fn read_keep(mut r: impl Read) -> Result<Vec<String>, String> {
-    let mut count_buf = [0u8; 4];
-    r.read_exact(&mut count_buf).map_err(|e| format!("keep list: {e}"))?;
-    let count = u32::from_be_bytes(count_buf);
-    if count > MAX_KEEP {
-        return Err("keep list too large".into());
-    }
-    let mut out = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let mut len_buf = [0u8; 4];
-        r.read_exact(&mut len_buf).map_err(|e| format!("keep list: {e}"))?;
-        let len = u32::from_be_bytes(len_buf);
-        if len > MAX_PATH {
-            return Err("path too long".into());
-        }
-        let mut buf = vec![0u8; len as usize];
-        r.read_exact(&mut buf).map_err(|e| format!("keep list: {e}"))?;
-        let path = String::from_utf8(buf).map_err(|e| e.to_string())?;
-        out.push(path);
-    }
-    Ok(out)
-}
-
-fn prune(root: &Path, keep: &[String]) -> Result<(), String> {
-    let keep: HashSet<&str> = keep.iter().map(String::as_str).collect();
-    let mut extra = Vec::new();
-    extra_files(root, root, &keep, &mut extra)?;
-    for path in extra {
-        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
-    Ok(())
-}
-
-fn extra_files(root: &Path, dir: &Path, keep: &HashSet<&str>, extra: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name();
-        if name.to_string_lossy().contains(".sinkd-conflict-") {
-            continue;
-        }
-        let path = entry.path();
-        let kind = entry.file_type().map_err(|e| e.to_string())?;
-        if kind.is_dir() {
-            extra_files(root, &path, keep, extra)?;
-            continue;
-        }
-        let rel = path.strip_prefix(root).map_err(|e| e.to_string())?;
-        let rel = rel.to_string_lossy().replace('\\', "/");
-        if !keep.contains(rel.as_str()) {
-            extra.push(path);
-        }
-    }
-    Ok(())
+    result
 }
 
 /// One-shot SSH transfer. `remote` is `user@host:/path`.
-pub fn sync_ssh(local: &Path, remote: &str, options: Opts) -> Result<Stats, String> {
-    sync_paths(options, &[local], Path::new(remote))
-}
-
-static IGNORE_JOB: std::sync::Mutex<Option<IgnoreActive>> = std::sync::Mutex::new(None);
-
-#[derive(Clone)]
-struct IgnoreActive {
-    root: PathBuf,
-    rules: Rules,
-}
-
-/// Arms libreflect's global filter for one blocking sync job.
-pub struct IgnoreGuard;
-
-impl IgnoreGuard {
-    pub fn arm(root: PathBuf, rules: Rules) -> Self {
-        *IGNORE_JOB.lock().unwrap_or_else(|err| err.into_inner()) = Some(IgnoreActive { root, rules });
-        set_extra_filter(Some(ignore_skip));
-        Self
-    }
-}
-
-impl Drop for IgnoreGuard {
-    fn drop(&mut self) {
-        *IGNORE_JOB.lock().unwrap_or_else(|err| err.into_inner()) = None;
-        set_extra_filter(None);
-    }
-}
-
-fn ignore_rules() -> Option<Rules> {
-    IGNORE_JOB
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .as_ref()
-        .map(|active| active.rules.clone())
-}
-
-fn ignore_skip(path: &str, is_dir: bool) -> bool {
-    let guard = IGNORE_JOB.lock().unwrap_or_else(|err| err.into_inner());
-    let Some(active) = guard.as_ref() else {
-        return false;
-    };
-    let rel = rel_for_filter(&active.root, path);
-    active.rules.ignored(&rel, is_dir)
-}
-
-fn rel_for_filter(root: &Path, path: &str) -> String {
-    let text = path.trim_start_matches(['/', '\\']).replace('\\', "/");
-    let as_path = Path::new(&text);
-    if let Ok(rel) = as_path.strip_prefix(root) {
-        return rel.to_string_lossy().replace('\\', "/");
-    }
-    text
+///
+/// The filter callback never reaches the remote receiver, so `.gitignore` is also
+/// handed to libreflect, which sends it on the wire and protects remote ignored
+/// paths from `delete`. That also skips `.git/`.
+pub fn sync_ssh(local: &Path, remote: &str, options: Opts, rules: Rules) -> Result<Stats, String> {
+    Job::open_paths_with(options, &[local], Path::new(remote), rules, true)?.run()
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::net::{TcpListener, TcpStream};
+    use std::path::PathBuf;
+    use std::thread;
 
     use super::*;
 
+    fn rules(root: &Path, lines: &[&str]) -> Rules {
+        let lines: Vec<String> = lines.iter().map(|s| (*s).to_string()).collect();
+        Rules::load(root, &lines)
+    }
+
+    fn write(path: PathBuf, body: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+
+    /// Sender pushes `src` into `dst` over loopback TCP, both jobs in this process.
+    fn fd_sync(src: &Path, dst: &Path, send_rules: Rules, recv_rules: Rules, delete: bool) -> (Stats, Stats) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let opts = Opts { delete, update_only: false };
+        let dst = dst.to_path_buf();
+        let recv = thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            sync_socket(&sock, Side::Receive, &dst, opts, recv_rules)
+        });
+        let sock = TcpStream::connect(addr).unwrap();
+        let sent = sync_socket(&sock, Side::Send, src, opts, send_rules).expect("send");
+        drop(sock);
+        let got = recv.join().unwrap().expect("receive");
+        (sent, got)
+    }
+
     #[test]
     fn local_mirror_copies_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
+        let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join("src");
         let dst = tmp.path().join("dst");
-        fs::create_dir_all(&src).expect("mkdir src");
-        fs::create_dir_all(&dst).expect("mkdir dst");
-        fs::write(src.join("a.txt"), b"hi").expect("write");
-        let stats = sync_paths(Opts { delete: true, ..Opts::default() }, &[src], &dst).expect("sync");
-        assert_eq!(fs::read(dst.join("a.txt")).expect("read"), b"hi");
+        write(src.join("a.txt"), "hi");
+        fs::create_dir_all(&dst).unwrap();
+        let stats = sync_paths(Opts { delete: true, ..Opts::default() }, &[&src], &dst, Rules::default()).unwrap();
+        assert_eq!(fs::read(dst.join("a.txt")).unwrap(), b"hi");
         assert!(stats.files >= 1);
     }
 
     #[test]
-    fn list_files_honors_ignore_guard() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        fs::create_dir_all(root.join("skip")).expect("mkdir");
-        fs::create_dir_all(root.join("keep")).expect("mkdir");
-        fs::write(root.join("skip/hidden.txt"), b"x").expect("write");
-        fs::write(root.join("keep/visible.txt"), b"y").expect("write");
-        let rules = sinkd_core::Rules::load(root, &["skip/".to_string()]);
-        let _guard = IgnoreGuard::arm(root.to_path_buf(), rules);
-        let listed = list_files(root).expect("list");
-        assert!(listed.iter().any(|p| p == "keep/visible.txt"));
-        assert!(!listed.iter().any(|p| p.contains("hidden")));
+    fn local_delete_protects_ignored_dest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        write(src.join("keep.txt"), "k");
+        write(src.join("build/y"), "y");
+        write(dst.join("gone.txt"), "g");
+        write(dst.join("build/x"), "x");
+        let rules = rules(&src, &["build/"]);
+        let stats = sync_paths(Opts { delete: true, ..Opts::default() }, &[&src], &dst, rules).unwrap();
+        assert!(dst.join("keep.txt").exists());
+        assert!(!dst.join("gone.txt").exists(), "dest-only file not deleted");
+        assert!(dst.join("build/x").exists(), "ignored dest file was deleted");
+        assert!(!dst.join("build/y").exists(), "ignored src file was sent");
+        assert!(stats.deleted >= 1);
     }
 
     #[test]
-    fn delete_keep_list_drops_the_extra_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
+    fn fd_pair_delete_in_one_process() {
+        let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join("src");
         let dst = tmp.path().join("dst");
-        fs::create_dir_all(src.join("sub")).expect("mkdir src");
-        fs::create_dir_all(&dst).expect("mkdir dst");
-        fs::create_dir_all(dst.join("sub")).expect("mkdir dst sub");
-        fs::write(src.join("sub/b.txt"), b"stay").expect("write b");
-        fs::write(dst.join("a.txt"), b"gone").expect("write a");
-        fs::write(dst.join("sub/b.txt"), b"stay").expect("write kept");
-        let listed = list_files(&src).expect("list");
-        let mut buf = Vec::new();
-        write_keep(&mut buf, &listed).expect("write");
-        let keep = read_keep(buf.as_slice()).expect("read");
-        assert_eq!(keep, vec!["sub/b.txt".to_string()]);
-        prune(&dst, &keep).expect("prune");
-        assert!(!dst.join("a.txt").exists());
-        assert_eq!(fs::read(dst.join("sub/b.txt")).expect("kept"), b"stay");
+        write(src.join("sub/b.txt"), "stay");
+        write(src.join("node_modules/pkg.js"), "skip");
+        write(dst.join("a.txt"), "gone");
+        write(dst.join("sub/b.txt"), "old");
+        write(dst.join("node_modules/local.js"), "mine");
+        let (_, got) = fd_sync(
+            &src,
+            &dst,
+            rules(&src, &["node_modules/"]),
+            rules(&dst, &["node_modules/"]),
+            true,
+        );
+        assert!(!dst.join("a.txt").exists(), "fd receiver did not delete");
+        assert_eq!(fs::read_to_string(dst.join("sub/b.txt")).unwrap(), "stay");
+        assert!(dst.join("node_modules/local.js").exists(), "receiver ignored file was deleted");
+        assert!(!dst.join("node_modules/pkg.js").exists(), "sender ignored file was sent");
+        assert!(got.deleted >= 1, "deleted stat: {got:?}");
+    }
+
+    #[test]
+    fn negation_reincludes_child() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        write(src.join("something/thing/a.txt"), "a");
+        write(src.join("something/other/b.txt"), "b");
+        write(src.join("top.txt"), "t");
+        write(dst.join("something/local.txt"), "mine");
+        write(dst.join("something/thing/stale.txt"), "old");
+        let rules = rules(&src, &["something/", "!something/thing/"]);
+        sync_paths(Opts { delete: true, ..Opts::default() }, &[&src], &dst, rules).unwrap();
+        assert!(dst.join("top.txt").exists());
+        assert!(dst.join("something/local.txt").exists(), "ignored dest file under descended dir deleted");
+        assert!(!dst.join("something/thing/stale.txt").exists(), "re-included stale file kept");
+        assert!(dst.join("something/thing/a.txt").exists(), "re-included child missing");
+        assert!(!dst.join("something/other/b.txt").exists(), "excluded sibling sent");
+    }
+
+    #[test]
+    fn concurrent_jobs_keep_own_rules() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let runs: Vec<_> = ["a", "b"]
+            .into_iter()
+            .map(|skip| {
+                let base = base.clone();
+                thread::spawn(move || {
+                    let src = base.join(format!("src-{skip}"));
+                    let dst = base.join(format!("dst-{skip}"));
+                    for dir in ["a", "b"] {
+                        for i in 0..50 {
+                            write(src.join(format!("{dir}/f{i}.txt")), "x");
+                        }
+                    }
+                    fs::create_dir_all(&dst).unwrap();
+                    let pat = format!("{skip}/");
+                    fd_sync(&src, &dst, rules(&src, &[&pat]), rules(&dst, &[&pat]), true);
+                    (skip, dst)
+                })
+            })
+            .collect();
+        for run in runs {
+            let (skip, dst) = run.join().unwrap();
+            let kept = if skip == "a" { "b" } else { "a" };
+            assert!(!dst.join(skip).exists(), "{skip}/ leaked into its own job");
+            for i in 0..50 {
+                assert!(dst.join(format!("{kept}/f{i}.txt")).exists(), "{kept}/f{i} missing in job {skip}");
+            }
+        }
     }
 }

@@ -12,6 +12,9 @@ pkg/**/__gen/
 
 scenario/docker/bin/
 
+# local libreflect release tarballs for test-local-docker (temporary)
+tar/
+
 # pages assemble
 _site/
 .skip-deploy

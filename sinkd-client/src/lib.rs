@@ -14,7 +14,7 @@ use sinkd_core::{
 };
 use sinkd_core::ClientSettings;
 use sinkd_proto::{decode, encode, events_selector, rpc_key, Body, HeadEvent, Reply, Request, VERSION};
-use sinkd_reflect::{sync_socket, IgnoreGuard, Opts, Side};
+use sinkd_reflect::{sync_socket, Opts, Side};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -354,8 +354,7 @@ async fn transfer(
         let _ = sock.set_write_timeout(Some(Duration::from_secs(120)));
         std::io::Write::write_all(&mut &sock, &token).map_err(|e| e.to_string())?;
         let side = if client_sends { Side::Send } else { Side::Receive };
-        let _guard = IgnoreGuard::arm(dir.clone(), rules);
-        sync_socket(&sock, side, &dir, Opts { delete, update_only }).map(|_| ())
+        sync_socket(&sock, side, &dir, Opts { delete, update_only }, rules).map(|_| ())
     })
     .await
     .map_err(|e| e.to_string())?;

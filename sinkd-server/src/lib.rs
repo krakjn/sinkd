@@ -11,7 +11,7 @@ use sinkd_core::{
     random_bytes, secrets_eq, serve, socket_path, Role, Rules, ServerSettings,
 };
 use sinkd_proto::{decode, encode, event_key, rpc_key, up_key, Body, HeadEvent, Reply, Request, VERSION};
-use sinkd_reflect::{sync_socket, IgnoreGuard, Opts, Side};
+use sinkd_reflect::{sync_socket, Opts, Side};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{watch, Mutex, OwnedMutexGuard};
@@ -417,13 +417,15 @@ async fn handle_data(sock: TcpStream, hub: &SharedHub, session: &zenoh::Session,
     let side = if client_sends { Side::Receive } else { Side::Send };
     let opts = Opts { delete, update_only };
     let rules = Rules::load(&dir, &ignore);
-    let stats = tokio::task::spawn_blocking(move || {
-        let _filter = IgnoreGuard::arm(dir.clone(), rules);
-        sync_socket(&std_sock, side, &dir, opts)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    log::info!("{anchor_key}: files={} bytes={}", stats.files, stats.bytes);
+    let stats = tokio::task::spawn_blocking(move || sync_socket(&std_sock, side, &dir, opts, rules))
+        .await
+        .map_err(|e| e.to_string())??;
+    log::info!(
+        "{anchor_key}: files={} bytes={} deleted={}",
+        stats.files,
+        stats.bytes,
+        stats.deleted
+    );
     if client_sends {
         let (head, sync_root) = {
             let mut locked = hub.lock().await;

@@ -63,7 +63,7 @@ async fn pause_for_pair(err: &str) -> bool {
     log::info!("{err}");
     tokio::select! {
         _ = tokio::signal::ctrl_c() => false,
-        _ = tokio::time::sleep(Duration::from_secs(30)) => true,
+        () = tokio::time::sleep(Duration::from_secs(30)) => true,
     }
 }
 
@@ -81,7 +81,8 @@ fn main() -> ExitCode {
         Some(Cmd::Stop) => stop_running(&runtime),
         Some(Cmd::Reload) => reload_running(&runtime),
         Some(Cmd::Ssh { remote, anchor, delete }) => {
-            sync_ssh(&anchor, &remote, Opts { delete, update_only: false }).map(|_| ())
+            let rules = sinkd_core::Rules::load(&anchor, &[]);
+            sync_ssh(&anchor, &remote, Opts { delete, update_only: false }, rules).map(|_| ())
         }
         None => {
             let anchors: Vec<_> = cli.anchor.iter().map(|p| expand(&p.to_string_lossy())).collect();
