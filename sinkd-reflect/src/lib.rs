@@ -11,6 +11,7 @@ use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+use sinkd_core::Rules;
 use sinkd_reflect_sys as sys;
 
 const OK: i32 = sys::reflect_code_REFLECT_OK.cast_signed();
@@ -312,13 +313,14 @@ fn exchange_keep(socket: &std::net::TcpStream, side: Side, dir: &Path) -> Result
 }
 
 fn list_files(root: &Path) -> Result<Vec<String>, String> {
+    let rules = ignore_rules();
     let mut out = Vec::new();
-    walk_files(root, root, &mut out)?;
+    walk_files(root, root, rules.as_ref(), &mut out)?;
     out.sort();
     Ok(out)
 }
 
-fn walk_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
+fn walk_files(root: &Path, dir: &Path, rules: Option<&Rules>, out: &mut Vec<String>) -> Result<(), String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -328,12 +330,22 @@ fn walk_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), Stri
         }
         let path = entry.path();
         let kind = entry.file_type().map_err(|e| e.to_string())?;
+        let Ok(rel) = path.strip_prefix(root) else { continue };
+        let rel = rel.to_string_lossy().replace('\\', "/");
         if kind.is_dir() {
-            walk_files(root, &path, out)?;
+            if rules.is_some_and(|rules| rules.ignored(&rel, true) && !rules.descend(&rel)) {
+                continue;
+            }
+            walk_files(root, &path, rules, out)?;
             continue;
         }
-        let rel = path.strip_prefix(root).map_err(|e| e.to_string())?;
-        out.push(rel.to_string_lossy().replace('\\', "/"));
+        if !kind.is_file() && !kind.is_symlink() {
+            continue;
+        }
+        if rules.is_some_and(|rules| rules.ignored(&rel, false)) {
+            continue;
+        }
+        out.push(rel);
     }
     Ok(())
 }
@@ -416,6 +428,58 @@ pub fn sync_ssh(local: &Path, remote: &str, options: Opts) -> Result<Stats, Stri
     sync_paths(options, &[local], Path::new(remote))
 }
 
+static IGNORE_JOB: std::sync::Mutex<Option<IgnoreActive>> = std::sync::Mutex::new(None);
+
+#[derive(Clone)]
+struct IgnoreActive {
+    root: PathBuf,
+    rules: Rules,
+}
+
+/// Arms libreflect's global filter for one blocking sync job.
+pub struct IgnoreGuard;
+
+impl IgnoreGuard {
+    pub fn arm(root: PathBuf, rules: Rules) -> Self {
+        *IGNORE_JOB.lock().unwrap_or_else(|err| err.into_inner()) = Some(IgnoreActive { root, rules });
+        set_extra_filter(Some(ignore_skip));
+        Self
+    }
+}
+
+impl Drop for IgnoreGuard {
+    fn drop(&mut self) {
+        *IGNORE_JOB.lock().unwrap_or_else(|err| err.into_inner()) = None;
+        set_extra_filter(None);
+    }
+}
+
+fn ignore_rules() -> Option<Rules> {
+    IGNORE_JOB
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_ref()
+        .map(|active| active.rules.clone())
+}
+
+fn ignore_skip(path: &str, is_dir: bool) -> bool {
+    let guard = IGNORE_JOB.lock().unwrap_or_else(|err| err.into_inner());
+    let Some(active) = guard.as_ref() else {
+        return false;
+    };
+    let rel = rel_for_filter(&active.root, path);
+    active.rules.ignored(&rel, is_dir)
+}
+
+fn rel_for_filter(root: &Path, path: &str) -> String {
+    let text = path.trim_start_matches(['/', '\\']).replace('\\', "/");
+    let as_path = Path::new(&text);
+    if let Ok(rel) = as_path.strip_prefix(root) {
+        return rel.to_string_lossy().replace('\\', "/");
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -433,6 +497,21 @@ mod tests {
         let stats = sync_paths(Opts { delete: true, ..Opts::default() }, &[src], &dst).expect("sync");
         assert_eq!(fs::read(dst.join("a.txt")).expect("read"), b"hi");
         assert!(stats.files >= 1);
+    }
+
+    #[test]
+    fn list_files_honors_ignore_guard() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("skip")).expect("mkdir");
+        fs::create_dir_all(root.join("keep")).expect("mkdir");
+        fs::write(root.join("skip/hidden.txt"), b"x").expect("write");
+        fs::write(root.join("keep/visible.txt"), b"y").expect("write");
+        let rules = sinkd_core::Rules::load(root, &["skip/".to_string()]);
+        let _guard = IgnoreGuard::arm(root.to_path_buf(), rules);
+        let listed = list_files(root).expect("list");
+        assert!(listed.iter().any(|p| p == "keep/visible.txt"));
+        assert!(!listed.iter().any(|p| p.contains("hidden")));
     }
 
     #[test]

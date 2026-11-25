@@ -8,10 +8,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sinkd_core::{
     anchor_key, atomic_write, ensure_server_identity, issue_client, load_peers, open_session,
-    random_bytes, secrets_eq, serve, socket_path, Role, ServerSettings,
+    random_bytes, secrets_eq, serve, socket_path, Role, Rules, ServerSettings,
 };
 use sinkd_proto::{decode, encode, event_key, rpc_key, up_key, Body, HeadEvent, Reply, Request, VERSION};
-use sinkd_reflect::{sync_socket, Opts, Side};
+use sinkd_reflect::{sync_socket, IgnoreGuard, Opts, Side};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{watch, Mutex, OwnedMutexGuard};
@@ -45,6 +45,7 @@ struct Permit {
     update_only: bool,
     anchor_key: String,
     client_id: String,
+    ignore: Vec<String>,
     guard: OwnedMutexGuard<()>,
 }
 
@@ -233,12 +234,51 @@ async fn answer(hub: &SharedHub, data_port: u16, payload: Option<&zenoh::bytes::
         return Reply::Failed { message: "protocol version mismatch".into() };
     }
     match &request.body {
-        Body::Push { anchor_id, path, user, share, basis } => {
-            grant(hub, data_port, &request, anchor_id, path, user, *share, Some(*basis), true, true, false).await
-        }
-        Body::Pull { anchor_id, path, user, share, delete, update_only } => {
-            grant(hub, data_port, &request, anchor_id, path, user, *share, None, false, *delete, *update_only).await
-        }
+        Body::Push {
+            anchor_id,
+            path,
+            user,
+            share,
+            basis,
+            ignore,
+        } => grant(
+            hub,
+            data_port,
+            &request,
+            anchor_id,
+            path,
+            user,
+            *share,
+            ignore.clone(),
+            Some(*basis),
+            true,
+            true,
+            false,
+        )
+        .await,
+        Body::Pull {
+            anchor_id,
+            path,
+            user,
+            share,
+            delete,
+            update_only,
+            ignore,
+        } => grant(
+            hub,
+            data_port,
+            &request,
+            anchor_id,
+            path,
+            user,
+            *share,
+            ignore.clone(),
+            None,
+            false,
+            *delete,
+            *update_only,
+        )
+        .await,
     }
 }
 
@@ -251,6 +291,7 @@ async fn grant(
     path: &str,
     user: &str,
     share: bool,
+    ignore: Vec<String>,
     basis: Option<u64>,
     client_sends: bool,
     delete: bool,
@@ -303,6 +344,7 @@ async fn grant(
             update_only,
             anchor_key: key,
             client_id: request.client_id.clone(),
+            ignore,
             guard,
         },
     );
@@ -362,12 +404,25 @@ async fn handle_data(sock: TcpStream, hub: &SharedHub, session: &zenoh::Session,
         .permits
         .remove(&token)
         .ok_or_else(|| "unknown or expired token".to_string())?;
-    let Permit { dir, client_sends, delete, update_only, anchor_key, client_id, guard } = permit;
+    let Permit {
+        dir,
+        client_sends,
+        delete,
+        update_only,
+        anchor_key,
+        client_id,
+        ignore,
+        guard,
+    } = permit;
     let side = if client_sends { Side::Receive } else { Side::Send };
     let opts = Opts { delete, update_only };
-    let stats = tokio::task::spawn_blocking(move || sync_socket(&std_sock, side, &dir, opts))
-        .await
-        .map_err(|e| e.to_string())??;
+    let rules = Rules::load(&dir, &ignore);
+    let stats = tokio::task::spawn_blocking(move || {
+        let _filter = IgnoreGuard::arm(dir.clone(), rules);
+        sync_socket(&std_sock, side, &dir, opts)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     log::info!("{anchor_key}: files={} bytes={}", stats.files, stats.bytes);
     if client_sends {
         let (head, sync_root) = {

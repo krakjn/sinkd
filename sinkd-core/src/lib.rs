@@ -20,7 +20,7 @@ pub use paths::{
 pub use ignore::Rules;
 pub use session::{open_session, Role};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -51,6 +51,7 @@ pub struct ClientSettings {
     pub zenoh_port: u16,
     pub pair_port: u16,
     pub watches: Vec<Watch>,
+    pub config_file: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -62,11 +63,15 @@ struct ServerFile {
     pair_port: Option<u16>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum AnchorSpec {
     Path(String),
-    Table { path: String, #[serde(default)] ignore: Vec<String> },
+    Table {
+        path: String,
+        #[serde(default, alias = "excludes")]
+        ignore: Vec<String>,
+    },
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -132,33 +137,34 @@ pub fn load_client(config: Option<&std::path::Path>, over: ClientOverrides) -> R
     let path = config.map_or_else(|| config_dir().join("client.toml"), PathBuf::from);
     let file = read_toml::<ClientFile>(&path)?;
     let state = over.state_dir.clone().unwrap_or_else(|| state_dir("sinkd"));
+    let file_watches = watches_from_file(&file);
     let server = over
         .server
-        .or(file.server)
+        .or_else(|| file.server.clone())
         .or_else(|| remembered_host(&state))
         .ok_or_else(|| {
             "no server set; pass --server, set it in client.toml, or run `sinkd pair <host>`".to_string()
         })?;
-    let mut watches = Vec::new();
-    if over.anchors.is_empty() && over.shares.is_empty() {
-        for spec in file.anchors.unwrap_or_default() {
-            let (path, ignore) = match spec {
-                AnchorSpec::Path(path) => (path, Vec::new()),
-                AnchorSpec::Table { path, ignore } => (path, ignore),
-            };
-            watches.push(Watch { path: expand(&path), share: false, ignore });
-        }
-        for path in file.shares.unwrap_or_default() {
-            watches.push(Watch { path: expand(&path), share: true, ignore: Vec::new() });
-        }
+    let watches = if over.anchors.is_empty() && over.shares.is_empty() {
+        file_watches
     } else {
+        let mut out = Vec::new();
         for path in over.anchors {
-            watches.push(Watch { path, share: false, ignore: Vec::new() });
+            if let Some(watch) = watch_for_path(&file_watches, &path) {
+                out.push(watch);
+            } else {
+                out.push(Watch { path, share: false, ignore: Vec::new() });
+            }
         }
         for path in over.shares {
-            watches.push(Watch { path, share: true, ignore: Vec::new() });
+            if let Some(watch) = file_watches.iter().find(|w| w.share && paths_match(&w.path, &path)) {
+                out.push(watch.clone());
+            } else {
+                out.push(Watch { path, share: true, ignore: Vec::new() });
+            }
         }
-    }
+        out
+    };
     if watches.is_empty() {
         return Err("no anchors; pass --anchor or set anchors in client.toml".into());
     }
@@ -169,7 +175,48 @@ pub fn load_client(config: Option<&std::path::Path>, over: ClientOverrides) -> R
         zenoh_port: over.zenoh_port.or(file.zenoh_port).unwrap_or(7447),
         pair_port: over.pair_port.or(file.pair_port).unwrap_or(7449),
         watches,
+        config_file: path,
     })
+}
+
+fn watches_from_file(file: &ClientFile) -> Vec<Watch> {
+    let mut out = Vec::new();
+    for spec in file.anchors.clone().unwrap_or_default() {
+        let (path, ignore) = match spec {
+            AnchorSpec::Path(path) => (path, Vec::new()),
+            AnchorSpec::Table { path, ignore } => (path, ignore),
+        };
+        out.push(Watch {
+            path: expand(&path),
+            share: false,
+            ignore,
+        });
+    }
+    for path in file.shares.clone().unwrap_or_default() {
+        out.push(Watch {
+            path: expand(&path),
+            share: true,
+            ignore: Vec::new(),
+        });
+    }
+    out
+}
+
+fn watch_for_path(file_watches: &[Watch], path: &Path) -> Option<Watch> {
+    file_watches
+        .iter()
+        .find(|watch| !watch.share && paths_match(&watch.path, path))
+        .cloned()
+}
+
+fn paths_match(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 pub fn remembered_host(state: &std::path::Path) -> Option<String> {
@@ -206,7 +253,42 @@ pub fn manifest_path(state: &std::path::Path, anchor_key: &str) -> PathBuf {
 
 #[cfg(test)]
 mod anchor_parse {
+    use std::path::PathBuf;
+
     use super::load_client;
+
+    #[test]
+    fn cli_anchor_keeps_file_ignore_when_paths_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("client.toml");
+        std::fs::write(
+            &cfg,
+            "server = \"hub\"\n[[anchors]]\npath = \"/data\"\nignore = [\"skip/\"]\n",
+        )
+        .unwrap();
+        let settings = load_client(
+            Some(&cfg),
+            super::ClientOverrides {
+                anchors: vec![PathBuf::from("/data")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(settings.watches[0].ignore, ["skip/"]);
+    }
+
+    #[test]
+    fn excludes_alias_parses_as_ignore() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("client.toml");
+        std::fs::write(
+            &cfg,
+            "server = \"hub\"\n[[anchors]]\npath = \"/data\"\nexcludes = [\"old/\"]\n",
+        )
+        .unwrap();
+        let settings = load_client(Some(&cfg), Default::default()).unwrap();
+        assert_eq!(settings.watches[0].ignore, ["old/"]);
+    }
 
     #[test]
     fn table_keeps_ignore_and_a_string_list_still_works() {

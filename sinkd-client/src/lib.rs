@@ -14,7 +14,7 @@ use sinkd_core::{
 };
 use sinkd_core::ClientSettings;
 use sinkd_proto::{decode, encode, events_selector, rpc_key, Body, HeadEvent, Reply, Request, VERSION};
-use sinkd_reflect::{sync_socket, Opts, Side};
+use sinkd_reflect::{sync_socket, IgnoreGuard, Opts, Side};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -113,11 +113,11 @@ pub async fn run(settings: ClientSettings) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
-    let watches = prepare(&settings.watches)?;
+    let watches = prepare(&settings.watches, &settings.config_file)?;
     for watch in &watches {
         debouncer
             .watch(&watch.path, RecursiveMode::Recursive)
-            .map_err(|e| format!("{}: {e}", watch.path.display()))?;
+            .map_err(|e| anchor_setup_err(&watch.path, &e, &settings.config_file))?;
         log::info!("watching {}", watch.path.display());
     }
     let mut rescan = tokio::time::interval(Duration::from_secs(30));
@@ -179,7 +179,8 @@ pub async fn run(settings: ClientSettings) -> Result<(), String> {
             _ = rescan.tick() => {
                 for watch in &watches.clone() {
                     let manifest = sinkd_core::manifest::load(&manifest_path(&settings.state_dir, &key_of(watch)));
-                    if sinkd_core::dirty(&watch.path, &manifest).is_empty() {
+                    let rules = sinkd_core::Rules::load(&watch.path, &watch.ignore);
+                    if sinkd_core::dirty_with(&watch.path, &manifest, &rules).is_empty() {
                         continue;
                     }
                     if let Err(e) = sync_anchor(&session, &rpc, &settings, &bundle.id, &bundle.secret, watch, false, &applying).await {
@@ -192,16 +193,6 @@ pub async fn run(settings: ClientSettings) -> Result<(), String> {
     let _ = watches;
     let _ = session.close().await;
     Ok(())
-}
-
-fn prepare(watches: &[Watch]) -> Result<Vec<Watch>, String> {
-    let mut out = Vec::new();
-    for watch in watches {
-        std::fs::create_dir_all(&watch.path).map_err(|e| format!("{}: {e}", watch.path.display()))?;
-        let path = watch.path.canonicalize().map_err(|e| format!("{}: {e}", watch.path.display()))?;
-        out.push(Watch { path, share: watch.share, ignore: watch.ignore.clone() });
-    }
-    Ok(out)
 }
 
 fn ignored_event(watch: &Watch, path: &Path) -> bool {
@@ -268,6 +259,7 @@ async fn sync_anchor(
             user: user_name(),
             share: watch.share,
             basis,
+            ignore: watch.ignore.clone(),
         },
     };
     match rpc_call(session, rpc, &request).await? {
@@ -324,6 +316,7 @@ async fn pull(
             share: watch.share,
             delete,
             update_only,
+            ignore: watch.ignore.clone(),
         },
     };
     match rpc_call(session, rpc, &request).await? {
@@ -361,7 +354,7 @@ async fn transfer(
         let _ = sock.set_write_timeout(Some(Duration::from_secs(120)));
         std::io::Write::write_all(&mut &sock, &token).map_err(|e| e.to_string())?;
         let side = if client_sends { Side::Send } else { Side::Receive };
-        let _guard = JobIgnore::arm(dir.clone(), rules);
+        let _guard = IgnoreGuard::arm(dir.clone(), rules);
         sync_socket(&sock, side, &dir, Opts { delete, update_only }).map(|_| ())
     })
     .await
@@ -370,34 +363,43 @@ async fn transfer(
     result
 }
 
-struct JobIgnore;
-impl JobIgnore {
-    fn arm(root: PathBuf, rules: sinkd_core::Rules) -> Self {
-        *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Active { root, rules });
-        sinkd_reflect::set_extra_filter(Some(extra_skip));
-        Self
+fn prepare(watches: &[Watch], config: &Path) -> Result<Vec<Watch>, String> {
+    let mut out = Vec::new();
+    for watch in watches {
+        std::fs::create_dir_all(&watch.path)
+            .map_err(|e| anchor_io_err(&watch.path, e, config))?;
+        let path = watch
+            .path
+            .canonicalize()
+            .map_err(|e| anchor_io_err(&watch.path, e, config))?;
+        out.push(Watch {
+            path,
+            share: watch.share,
+            ignore: watch.ignore.clone(),
+        });
     }
-}
-impl Drop for JobIgnore {
-    fn drop(&mut self) {
-        *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        sinkd_reflect::set_extra_filter(None);
-    }
+    Ok(out)
 }
 
-struct Active {
-    root: PathBuf,
-    rules: sinkd_core::Rules,
+fn anchor_setup_err(path: &Path, err: impl std::fmt::Display, config: &Path) -> String {
+    format!(
+        "{}: {err}; is the anchor path right? Check [[anchors]].path in {} (--config)",
+        path.display(),
+        config.display()
+    )
 }
 
-static ACTIVE: std::sync::Mutex<Option<Active>> = std::sync::Mutex::new(None);
-
-fn extra_skip(path: &str, is_dir: bool) -> bool {
-    let guard = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(active) = guard.as_ref() else { return false };
-    let rel = path.strip_prefix(&*active.root.to_string_lossy()).unwrap_or(path);
-    let rel = rel.trim_start_matches(['/', '\\']).replace('\\', "/");
-    active.rules.ignored(&rel, is_dir)
+fn anchor_io_err(path: &Path, err: std::io::Error, config: &Path) -> String {
+    let hint = match err.kind() {
+        std::io::ErrorKind::NotFound => "no such path",
+        std::io::ErrorKind::PermissionDenied => "permission denied",
+        _ => "is the anchor path right?",
+    };
+    format!(
+        "{}: {err}; {hint}. Check [[anchors]].path in {} (--config)",
+        path.display(),
+        config.display()
+    )
 }
 
 async fn rpc_call(session: &zenoh::Session, key: &str, request: &Request) -> Result<Reply, String> {

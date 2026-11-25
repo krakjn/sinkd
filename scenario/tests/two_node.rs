@@ -194,3 +194,110 @@ fn client_push_lands_on_server() {
     };
     assert_eq!(fs::read_to_string(found).unwrap(), "hello-from-client\n");
 }
+
+#[test]
+fn ignore_skips_push_and_pull() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let anchor = root.join("anchor");
+    let sync = root.join("sync");
+    let server_state = root.join("srv-state");
+    let client_state = root.join("cli-state");
+    let server_run = root.join("srv-run");
+    let client_run = root.join("cli-run");
+    fs::create_dir_all(anchor.join("keep")).unwrap();
+    fs::create_dir_all(anchor.join("skip")).unwrap();
+    fs::write(anchor.join("keep/visible.txt"), "ok\n").unwrap();
+    fs::write(anchor.join("skip/secret.txt"), "nope\n").unwrap();
+    let zenoh = 17457u16;
+    let data = 17458u16;
+    let pair = 17459u16;
+    let client_cfg = root.join("client.toml");
+    fs::write(
+        &client_cfg,
+        format!(
+            "zenoh_port = {zenoh}\npair_port = {pair}\n[[anchors]]\npath = \"{}\"\nignore = [\"skip/\"]\n",
+            anchor.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let srv = bin("sinkd-srv");
+    let cli = bin("sinkd");
+    let srv_log = root.join("srv.log");
+    let cli_log = root.join("cli.log");
+    let _server = spawn(
+        &srv,
+        &[
+            "--bind",
+            "127.0.0.1",
+            "--sync-root",
+            &sync.to_string_lossy(),
+            "--state-dir",
+            &server_state.to_string_lossy(),
+            "--runtime-dir",
+            &server_run.to_string_lossy(),
+            "--zenoh-port",
+            &zenoh.to_string(),
+            "--data-port",
+            &data.to_string(),
+            "--pair-port",
+            &pair.to_string(),
+            "--pair-code",
+            "434343",
+        ],
+        &srv_log,
+    );
+    wait_line(&srv_log, "zenoh tls", Duration::from_secs(20));
+
+    let pair_log = root.join("pair.log");
+    let pair_out = fs::File::create(&pair_log).unwrap();
+    let status = Command::new(&cli)
+        .args([
+            "--state-dir",
+            &client_state.to_string_lossy(),
+            "pair",
+            "127.0.0.1",
+            "--code",
+            "434343",
+            "--pair-port",
+            &pair.to_string(),
+        ])
+        .stdout(Stdio::from(pair_out.try_clone().unwrap()))
+        .stderr(Stdio::from(pair_out))
+        .status()
+        .unwrap();
+    assert!(status.success(), "pair failed:\n{}", fs::read_to_string(&pair_log).unwrap_or_default());
+
+    let _client = spawn(
+        &cli,
+        &[
+            "--config",
+            &client_cfg.to_string_lossy(),
+            "--state-dir",
+            &client_state.to_string_lossy(),
+            "--runtime-dir",
+            &client_run.to_string_lossy(),
+            "--server",
+            "127.0.0.1",
+        ],
+        &cli_log,
+    );
+    wait_line(&cli_log, "watching", Duration::from_secs(20));
+
+  let start = Instant::now();
+    loop {
+        let vis = find_file(&sync, "visible.txt").is_some();
+        let sec = find_file(&sync, "secret.txt").is_none();
+        if vis && sec {
+            break;
+        }
+        assert!(
+            start.elapsed() <= Duration::from_secs(30),
+            "sync did not finish\nserver:\n{}\nclient:\n{}",
+            fs::read_to_string(&srv_log).unwrap_or_default(),
+            fs::read_to_string(&cli_log).unwrap_or_default()
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
+}
